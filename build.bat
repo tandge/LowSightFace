@@ -37,9 +37,33 @@ cd /d "!OUT!" || (echo Cannot cd& pause& goto menu)
 if errorlevel 1 (echo [ERROR] qmake& pause& goto menu)
 !MAKE!
 if errorlevel 1 (echo [ERROR] Build& pause& goto menu)
-"!QTDIR!\bin\windeployqt" --release --no-translations --no-compiler-runtime release\BntechEyeFriend.exe
+"!QTDIR!\bin\windeployqt" --!TYPE! --no-translations --no-compiler-runtime !TYPE!\BntechEyeFriend.exe
 if errorlevel 1 echo [WARN] windeployqt failed, copy Qt DLLs manually
-echo [OK] !OUT! - run: release\BntechEyeFriend.exe
+echo [OK] !OUT! - run: !TYPE!\BntechEyeFriend.exe
+
+if /i "!TYPE!"=="release" (
+  echo [PKG] Creating distributable zip ...
+  set "DIST=!OUT!\dist"
+  set "PKG=!DIST!\BntechEyeFriend"
+  set "ZIP=!OUT!\BntechEyeFriend-win64.zip"
+  if exist "!PKG!" rmdir /s /q "!PKG!"
+  if exist "!ZIP!" del /q "!ZIP!"
+  mkdir "!PKG!"
+  copy /y "!OUT!\release\BntechEyeFriend.exe" "!PKG!\" >nul
+  "!QTDIR!\bin\windeployqt" --release --no-translations --compiler-runtime "!PKG!\BntechEyeFriend.exe"
+  if errorlevel 1 (
+    echo [ERROR] windeployqt failed for dist
+    pause
+    goto menu
+  )
+  powershell -NoProfile -Command "Compress-Archive -Path '!PKG!\*' -DestinationPath '!ZIP!' -Force"
+  if errorlevel 1 (
+    echo [ERROR] Compress-Archive failed
+    pause
+    goto menu
+  )
+  echo [OK] Package: !ZIP!
+)
 goto menu
 
 :wasm

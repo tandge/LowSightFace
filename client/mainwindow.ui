@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>375</width>
+    <height>680</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>375</width>
+    <height>680</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>375</width>
+    <height>680</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>BntechEyeFriend</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QMainWindow {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    stop:0 #F0F0F0, stop:1 #E8E8E8);
+  border-radius: 24px;
+}
+#centralWidget, #overlay, #statusBar, #centerArea, #bottomArea {
+  background: transparent;
+}
+#timeLabel {
+  color: #FFFFFF;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 24px;
+  font-weight: 500;
+}
+#voiceHintLabel {
+  color: #FFFFFF;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+#transcriptionLabel {
+  color: #FFFFFF;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  background: rgba(0,0,0,0.35);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+/* === 底部 4 个圆形按钮 (对应 docs/gui.html L85-113) === */
+QPushButton#micButton, QPushButton#sendButton,
+QPushButton#videoButton, QPushButton#endCallButton {
+  border: none;
+  border-radius: 40px;
+  font-weight: bold;
+}
+/* 按钮 1: 麦克风 (默认态) - bg-white/90 */
+QPushButton#micButton {
+  background: rgba(255,255,255,0.90);
+  color: #444444;
+  font-size: 34px;
+}
+QPushButton#micButton:hover { background: rgba(255,255,255,1.0); }
+/* 按钮 1: 麦克风激活态 (绿色) */
+QPushButton#micButton:checked {
+  background: #4CAF50;
+  color: #FFFFFF;
+  font-size: 30px;
+}
+QPushButton#micButton:checked:hover { background: #5DBE61; }
+/* 按钮 2: 发送/上传 - bg-white/70 */
+QPushButton#sendButton {
+  background: rgba(255,255,255,0.70);
+  color: #555555;
+  font-size: 30px;
+}
+QPushButton#sendButton:hover { background: rgba(255,255,255,0.85); }
+QPushButton#sendButton:pressed { background: rgba(255,255,255,0.95); color: #333333; }
+/* 按钮 3: 视频通话 (默认态) - bg-white */
+QPushButton#videoButton {
+  background: #FFFFFF;
+  color: #000000;
+  font-size: 32px;
+}
+QPushButton#videoButton:hover { background: rgba(255,255,255,0.92); }
+/* 按钮 3: 视频通话激活态 (红色录制中) */
+QPushButton#videoButton:checked {
+  background: #FF3B30;
+  color: #FFFFFF;
+  font-size: 22px;
+}
+QPushButton#videoButton:checked:hover { background: #FF5147; }
+/* 按钮 4: 结束通话 - bg-white/90, 红色 X */
+QPushButton#endCallButton {
+  background: rgba(255,255,255,0.90);
+  color: #FF3B30;
+  font-size: 38px;
+}
+QPushButton#endCallButton:hover { background: rgba(255,255,255,1.0); }
+</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QGridLayout" name="rootLayout">
+    <property name="leftMargin"><number>0</number></property>
+    <property name="topMargin"><number>0</number></property>
+    <property name="rightMargin"><number>0</number></property>
+    <property name="bottomMargin"><number>0</number></property>
+    <property name="spacing"><number>0</number></property>
+    <!-- 摄像头实时画面背景: 占满整个网格 -->
+    <item row="0" column="0">
+     <widget class="CameraWidget" name="cameraWidget" native="true"/>
+    </item>
+    <!-- 覆盖层 overlay: 位于摄像头之上, 承载状态栏 / 中部 / 底部 控件 -->
+    <item row="0" column="0">
+     <widget class="QWidget" name="overlay" native="true">
+      <layout class="QVBoxLayout" name="overlayLayout">
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+       <property name="spacing"><number>0</number></property>
+       <!-- ===== 顶部状态栏 ===== -->
+       <item>
+        <widget class="QWidget" name="statusBar" native="true">
+         <property name="minimumSize"><size><width>0</width><height>56</height></size></property>
+         <property name="maximumSize"><size><width>16777215</width><height>56</height></size></property>
+         <layout class="QHBoxLayout" name="statusLayout">
+          <property name="leftMargin"><number>24</number></property>
+          <property name="topMargin"><number>16</number></property>
+          <property name="rightMargin"><number>24</number></property>
+          <property name="bottomMargin"><number>4</number></property>
+          <item>
+           <widget class="QLabel" name="timeLabel">
+            <property name="text"><string>15:09</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="statusSpacer">
+            <property name="orientation"><enum>Qt::Horizontal</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <!-- 顶部到中部的弹性空间 -->
+       <item>
+        <spacer name="topSpacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+        </spacer>
+       </item>
+       <!-- ===== 中部语音状态区 (脉冲圆点 + 提示文字) ===== -->
+       <item>
+        <widget class="QWidget" name="centerArea" native="true">
+         <layout class="QVBoxLayout" name="centerLayout">
+          <property name="leftMargin"><number>0</number></property>
+          <property name="topMargin"><number>0</number></property>
+          <property name="rightMargin"><number>0</number></property>
+          <property name="bottomMargin"><number>0</number></property>
+          <property name="spacing"><number>16</number></property>
+          <item alignment="Qt::AlignHCenter">
+           <widget class="PulseDots" name="pulseDots" native="true"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="voiceHintLabel">
+            <property name="text"><string>你可以开始说话</string></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="transcriptionLabel">
+            <property name="text"><string/></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+            <property name="wordWrap"><bool>true</bool></property>
+            <property name="visible"><bool>false</bool></property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <!-- 中部到底部的弹性空间 -->
+       <item>
+        <spacer name="bottomSpacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+        </spacer>
+       </item>
+       <!-- ===== 底部四个圆形按钮 (麦克风 / 发送 / 视频 / 结束通话) ===== -->
+       <item>
+        <widget class="QWidget" name="bottomArea" native="true">
+         <layout class="QHBoxLayout" name="bottomButtonLayout">
+          <property name="leftMargin"><number>16</number></property>
+          <property name="topMargin"><number>8</number></property>
+          <property name="rightMargin"><number>16</number></property>
+          <property name="bottomMargin"><number>24</number></property>
+          <property name="spacing"><number>16</number></property>
+          <item>
+           <spacer name="btnLeftSpacer">
+            <property name="orientation"><enum>Qt::Horizontal</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="micButton">
+            <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+            <property name="toolTip"><string>麦克风 - 开启/关闭语音输入</string></property>
+            <property name="text"><string>🎤</string></property>
+            <property name="checkable"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="sendButton">
+            <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+            <property name="toolTip"><string>发送 - 上传画面与识别文本</string></property>
+            <property name="text"><string>📤</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="videoButton">
+            <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+            <property name="toolTip"><string>视频通话 - 开启/关闭</string></property>
+            <property name="text"><string>🎥</string></property>
+            <property name="checkable"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="endCallButton">
+            <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
+            <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+            <property name="toolTip"><string>结束通话</string></property>
+            <property name="text"><string>✕</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="btnRightSpacer">
+            <property name="orientation"><enum>Qt::Horizontal</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <!-- ========== 自定义控件提升声明 (uic 会按此引用头文件) ========== -->
+ <customwidgets>
+  <customwidget>
+   <class>CameraWidget</class>
+   <extends>QWidget</extends>
+   <header>camerawidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PulseDots</class>
+   <extends>QWidget</extends>
+   <header>pulsedots.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

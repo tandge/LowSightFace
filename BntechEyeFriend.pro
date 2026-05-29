@@ -11,16 +11,17 @@ SOURCES += \
     client/main.cpp \
     client/mainwindow.cpp \
     client/camerawidget.cpp \
-    client/volumeslider.cpp \
     client/pulsedots.cpp \
     client/whisperclient.cpp
 
 HEADERS += \
     client/mainwindow.h \
     client/camerawidget.h \
-    client/volumeslider.h \
     client/pulsedots.h \
     client/whisperclient.h
+
+FORMS += \
+    client/mainwindow.ui
 
 INCLUDEPATH += client
 

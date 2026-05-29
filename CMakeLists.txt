@@ -20,7 +20,6 @@ set(SOURCES
     client/main.cpp
     client/mainwindow.cpp
     client/camerawidget.cpp
-    client/volumeslider.cpp
     client/pulsedots.cpp
     client/whisperclient.cpp
 )
@@ -28,13 +27,17 @@ set(SOURCES
 set(HEADERS
     client/mainwindow.h
     client/camerawidget.h
-    client/volumeslider.h
     client/pulsedots.h
     client/whisperclient.h
 )
 
+# Qt Designer .ui files (AUTOUIC 会自动调用 uic 生成 ui_*.h)
+set(FORMS
+    client/mainwindow.ui
+)
+
 if(EMSCRIPTEN)
-    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${FORMS})
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt5::Core
@@ -49,7 +52,7 @@ if(EMSCRIPTEN)
         LINK_FLAGS "-s WASM=1 -s USE_QT5=1 -s TOTAL_MEMORY=268435456 -s ALLOW_MEMORY_GROWTH=1 --preload-file ${CMAKE_SOURCE_DIR}/assets@/assets -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s EXPORTED_FUNCTIONS=['_main','_malloc','_free'] -s ASYNCIFY=1 -s ASYNCIFY_IGNORE_INDIRECT=1"
     )
 else()
-    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${FORMS})
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt5::Core
