@@ -18,8 +18,24 @@
 #include "pulsedots.h"
 #include "whisperclient.h"
 
+#ifndef Q_OS_WASM
+#include "facemanagerdialog.h"
+#include "facedetector.h"
+#include "facealigner.h"
+#include "facerecognizer.h"
+#include "facedatabase.h"
+#ifdef HAS_TEXTTOSPEECH
+#include <QTextToSpeech>
+#endif
+#include <opencv2/opencv.hpp>
+#endif
+
 #include <QGraphicsDropShadowEffect>
 #include <QDebug>
+#include <QCoreApplication>
+#include <QFile>
+#include <QMessageBox>
+#include <memory>
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -111,36 +127,143 @@ void MainWindow::onMicrophoneToggled(bool checked)
 
 void MainWindow::onSendClicked()
 {
-    // 按钮 2: 抓取摄像头快照 + 取已识别文本 "发送"
-    if (ui->cameraWidget) {
-        ui->cameraWidget->capturePhoto();
-    }
-    const QString pending_text = ui->transcriptionLabel->text().trimmed();
-    qInfo() << "[Send] snapshot captured, transcription:" << pending_text;
+#ifndef Q_OS_WASM
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString retinaPath = appDir + QStringLiteral("/models/retinaface.onnx");
+    QString arcfacePath  = appDir + QStringLiteral("/models/arcface_r50.onnx");
+    QString dbPath       = appDir + QStringLiteral("/face.db");
 
-    // 简单 UI 反馈
-    ui->voiceHintLabel->setText(QStringLiteral("已发送"));
-    QTimer::singleShot(1200, this, [this]() {
+    if (!QFile::exists(retinaPath)) {
+        QMessageBox::warning(this, QStringLiteral("缺少模型"),
+            QStringLiteral("未找到检测模型:\n%1\n请将 retinaface.onnx 放到 exe 同级的 models/ 目录下。").arg(retinaPath));
+        return;
+    }
+    if (!QFile::exists(arcfacePath)) {
+        QMessageBox::warning(this, QStringLiteral("缺少模型"),
+            QStringLiteral("未找到识别模型:\n%1\n请将 arcface_r50.onnx 放到 exe 同级的 models/ 目录下。").arg(arcfacePath));
+        return;
+    }
+
+    try {
+        FaceManagerDialog dlg(retinaPath, arcfacePath, dbPath, this);
+        dlg.exec();
+    } catch (const std::exception& e) {
+        QMessageBox::critical(this, QStringLiteral("人脸管理启动失败"),
+            QStringLiteral("加载模型或初始化失败:\n%1").arg(QString::fromLocal8Bit(e.what())));
+    }
+#else
+    ui->voiceHintLabel->setText(QStringLiteral("人脸管理不支持 Web 版本"));
+    QTimer::singleShot(2000, this, [this]() {
         ui->voiceHintLabel->setText(is_mic_active_ ? QStringLiteral("正在倾听...")
                                                    : QStringLiteral("你可以开始说话"));
     });
+#endif
 }
 
 void MainWindow::onVideoToggled(bool checked)
 {
-    is_video_recording_ = checked;
-    // 按钮 3 (视频) 的红色"录制中"视觉态已由 .ui 中的 QSS :checked 自动切换
-    // 这里只切换图标文字与启停摄像头录制
-    ui->videoButton->setText(checked ? QStringLiteral("●") : QStringLiteral("🎥"));
+#ifndef Q_OS_WASM
+    if (!checked) return;
 
-    if (!ui->cameraWidget) {
+    // 单次触发：立即恢复按钮状态，避免录制逻辑
+    ui->videoButton->setChecked(false);
+
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString retinaPath = appDir + QStringLiteral("/models/retinaface.onnx");
+    QString arcfacePath = appDir + QStringLiteral("/models/arcface_r50.onnx");
+    QString dbPath = appDir + QStringLiteral("/face.db");
+
+    if (!QFile::exists(retinaPath) || !QFile::exists(arcfacePath)) {
+        QMessageBox::warning(this, QStringLiteral("缺少模型"),
+            QStringLiteral("请确保 models 目录存在"));
         return;
     }
-    if (checked) {
-        ui->cameraWidget->startRecording();
-    } else {
-        ui->cameraWidget->stopRecording();
+
+    // 延迟初始化模型（只执行一次）
+    static std::unique_ptr<FaceDetector> detector;
+    static std::unique_ptr<FaceAligner> aligner;
+    static std::unique_ptr<FaceRecognizer> recognizer;
+    static std::unique_ptr<FaceDatabase> db;
+    if (!detector) {
+        try {
+            detector = std::make_unique<FaceDetector>(retinaPath.toStdString());
+            aligner = std::make_unique<FaceAligner>();
+            recognizer = std::make_unique<FaceRecognizer>(arcfacePath.toStdString());
+            db = std::make_unique<FaceDatabase>(dbPath);
+        } catch (const std::exception& e) {
+            QMessageBox::critical(this, QStringLiteral("错误"),
+                QStringLiteral("模型加载失败: %1").arg(QString::fromLocal8Bit(e.what())));
+            return;
+        }
     }
+
+    // 抓取一帧
+    cv::VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("无法打开摄像头"));
+        return;
+    }
+    cv::Mat frame;
+    cap >> frame;
+    cap.release();
+    if (frame.empty()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("抓帧失败"));
+        return;
+    }
+
+    // 检测人脸
+    auto faces = detector->detect(frame);
+    if (faces.empty()) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("未检测到人脸"));
+        return;
+    }
+
+    // 对齐并提取特征
+    cv::Mat aligned = aligner->align(frame, faces[0].landmarks);
+    if (aligned.empty()) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("人脸对齐失败"));
+        return;
+    }
+    std::vector<float> feature = recognizer->extract(aligned);
+
+    // 与数据库比对（余弦相似度）
+    auto records = db->getAllFaceFeatures();
+    float best_sim = -1.0f;
+    QString best_name;
+    for (const auto& r : records) {
+        if (r.feature.size() != feature.size()) continue;
+        float dot = 0, na = 0, nb = 0;
+        for (size_t i = 0; i < feature.size(); ++i) {
+            dot += feature[i] * r.feature[i];
+            na += feature[i] * feature[i];
+            nb += r.feature[i] * r.feature[i];
+        }
+        if (na > 0 && nb > 0) {
+            float sim = dot / (std::sqrt(na) * std::sqrt(nb));
+            if (sim > best_sim) {
+                best_sim = sim;
+                best_name = r.person_name;
+            }
+        }
+    }
+
+    if (best_sim >= 0.70f) {
+        QString msg = QStringLiteral("识别到 %1 相似度 %2%")
+                          .arg(best_name)
+                          .arg(QString::number(best_sim * 100, 'f', 1));
+#ifdef HAS_TEXTTOSPEECH
+        QTextToSpeech tts;
+        tts.say(msg);
+#else
+        QMessageBox::information(this, QStringLiteral("识别结果"), msg);
+#endif
+    } else {
+        QMessageBox::information(this, QStringLiteral("提示"),
+            QStringLiteral("未匹配到已知人员"));
+    }
+#else
+    Q_UNUSED(checked)
+#endif
 }
 
 void MainWindow::onEndCallClicked()
