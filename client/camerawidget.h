@@ -14,6 +14,7 @@
 #include <QCameraViewfinder>
 #include <QCameraImageCapture>
 #include <QMediaRecorder>
+#include <QImage>
 
 class CameraWidget : public QWidget
 {
@@ -24,10 +25,17 @@ public:
     ~CameraWidget();
 
     void capturePhoto();
+    void requestFrame();                      // 从实时流请求一帧，发射 frameCaptured
     void startRecording();
     void stopRecording();
     void setVolume(int volume);
     void switchCamera();
+    void setCameraDevice(int index);   // 按索引切换摄像头
+    int currentCameraIndex() const;
+    void restartCamera();
+
+signals:
+    void frameCaptured(const QImage &frame);  // 实时帧捕获结果
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -42,6 +50,7 @@ private:
     QCameraImageCapture *image_capture_;
     QMediaRecorder *media_recorder_;
     int current_volume_;
+    int current_camera_index_;
 };
 
 #endif // CAMERAWIDGET_H

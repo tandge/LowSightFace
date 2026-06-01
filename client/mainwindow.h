@@ -28,6 +28,13 @@ namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
 class WhisperClient;
+class QImage;
+
+#ifdef HAS_TEXTTOSPEECH
+QT_BEGIN_NAMESPACE
+class QTextToSpeech;
+QT_END_NAMESPACE
+#endif
 
 class MainWindow : public QMainWindow
 {
@@ -44,6 +51,9 @@ private slots:
     void onEndCallClicked();                  // 按钮4: 结束通话 (红色 X)
     void updateStatusBarTime();
     void onTranscriptionReceived(const QString &text);
+#ifndef Q_OS_WASM
+    void onFrameCapturedForFace(const QImage &frame); // 视频按钮：实时帧人脸识别
+#endif
 
 private:
     // 由 uic 从 mainwindow.ui 自动生成的控件容器
@@ -51,6 +61,11 @@ private:
 
     // 语音识别客户端 (非 UI 组件, 仍由代码持有)
     WhisperClient *whisper_client_;
+
+#ifdef HAS_TEXTTOSPEECH
+    // 语音合成 (TTS) - 成员变量保证生命周期足够播放完成
+    QTextToSpeech *tts_;
+#endif
 
     // 状态标记
     bool is_mic_active_;

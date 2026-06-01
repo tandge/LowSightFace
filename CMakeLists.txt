@@ -17,6 +17,14 @@ find_package(Qt5 REQUIRED COMPONENTS
     Sql
 )
 
+# 可选: 语音合成模块
+find_package(Qt5 COMPONENTS TextToSpeech)
+if(Qt5TextToSpeech_FOUND)
+    message(STATUS "Qt5 TextToSpeech found")
+else()
+    message(WARNING "Qt5 TextToSpeech NOT found - voice playback disabled")
+endif()
+
 if(NOT EMSCRIPTEN)
     find_package(OpenCV REQUIRED)
     find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_cxx_api.h
@@ -95,6 +103,11 @@ else()
         ${OpenCV_LIBS}
         ${ONNXRUNTIME_LIB}
     )
+
+    if(Qt5TextToSpeech_FOUND)
+        target_link_libraries(${PROJECT_NAME} PRIVATE Qt5::TextToSpeech)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_TEXTTOSPEECH)
+    endif()
 
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${OpenCV_INCLUDE_DIRS}

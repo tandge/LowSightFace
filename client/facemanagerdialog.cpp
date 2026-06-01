@@ -32,10 +32,11 @@ static QImage cvMatToQImage(const cv::Mat& mat) {
 FaceManagerDialog::FaceManagerDialog(const QString& retina_model,
                                      const QString& arcface_model,
                                      const QString& db_path,
+                                     int camera_index,
                                      QWidget* parent)
     : QDialog(parent),
       capture_timer_(new QTimer(this)),
-      cap_(0),
+      cap_(camera_index),
       detector_(std::make_unique<FaceDetector>(retina_model.toStdString())),
       aligner_(std::make_unique<FaceAligner>()),
       recognizer_(std::make_unique<FaceRecognizer>(arcface_model.toStdString())),

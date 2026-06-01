@@ -22,6 +22,7 @@ public:
     explicit FaceManagerDialog(const QString& retina_model,
                                const QString& arcface_model,
                                const QString& db_path,
+                               int camera_index = 0,
                                QWidget* parent = nullptr);
     ~FaceManagerDialog();
 

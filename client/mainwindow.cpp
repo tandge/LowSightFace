@@ -35,7 +35,17 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QMessageBox>
+#include <QCameraInfo>
 #include <memory>
+
+#ifndef Q_OS_WASM
+namespace {
+    std::unique_ptr<FaceDetector>   g_detector;
+    std::unique_ptr<FaceAligner>    g_aligner;
+    std::unique_ptr<FaceRecognizer> g_recognizer;
+    std::unique_ptr<FaceDatabase>   g_db;
+}
+#endif
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -76,11 +86,51 @@ MainWindow::MainWindow(QWidget *parent)
     connect(whisper_client_, &WhisperClient::errorOccurred, this,
             [](const QString &error) { qWarning() << "Whisper error:" << error; });
 
+#ifdef HAS_TEXTTOSPEECH
+    // 语音合成后端 (成员变量, 避免局部对象被提前销毁)
+    tts_ = new QTextToSpeech(this);
+#endif
+
+    // 实时视频流帧捕获 -> 人脸识别
+#ifndef Q_OS_WASM
+    if (ui->cameraWidget) {
+        connect(ui->cameraWidget, &CameraWidget::frameCaptured,
+                this, &MainWindow::onFrameCapturedForFace);
+    }
+#endif
+
     // 底部 4 个按钮的信号连接 (按钮本身的样式 / 文字 / checkable 等已在 .ui 中描述)
     connect(ui->micButton,     &QPushButton::toggled, this, &MainWindow::onMicrophoneToggled);
     connect(ui->sendButton,    &QPushButton::clicked, this, &MainWindow::onSendClicked);
     connect(ui->videoButton,   &QPushButton::toggled, this, &MainWindow::onVideoToggled);
     connect(ui->endCallButton, &QPushButton::clicked, this, &MainWindow::onEndCallClicked);
+
+    // 枚举摄像头设备并填充顶部下拉框
+    if (ui->cameraComboBox) {
+        QList<QCameraInfo> cameras = QCameraInfo::availableCameras();
+        for (const QCameraInfo &info : cameras) {
+            QString label = info.description();
+            if (info.position() == QCamera::FrontFace)
+                label += QStringLiteral(" [前置]");
+            else if (info.position() == QCamera::BackFace)
+                label += QStringLiteral(" [后置]");
+            ui->cameraComboBox->addItem(label);
+        }
+        if (cameras.size() <= 1) {
+            ui->cameraComboBox->setVisible(false);
+        } else if (ui->cameraWidget) {
+            int idx = ui->cameraWidget->currentCameraIndex();
+            if (idx >= 0 && idx < cameras.size()) {
+                ui->cameraComboBox->setCurrentIndex(idx);
+            }
+            connect(ui->cameraComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                    this, [this](int index) {
+                if (ui->cameraWidget) {
+                    ui->cameraWidget->setCameraDevice(index);
+                }
+            });
+        }
+    }
 
     // 状态栏时间刷新
     clock_timer_ = new QTimer(this);
@@ -107,6 +157,11 @@ void MainWindow::onMicrophoneToggled(bool checked)
     // 按钮 1 (麦克风) 的激活态视觉切换已由 .ui 中的 QSS :checked 选择器自动完成
 
     if (checked) {
+#ifdef HAS_TEXTTOSPEECH
+        if (tts_) {
+            tts_->say(QStringLiteral("打开麦克风"));
+        }
+#endif
         ui->pulseDots->startAnimation();
         ui->voiceHintLabel->setText(QStringLiteral("正在倾听..."));
         ui->transcriptionLabel->show();
@@ -145,8 +200,14 @@ void MainWindow::onSendClicked()
     }
 
     try {
-        FaceManagerDialog dlg(retinaPath, arcfacePath, dbPath, this);
+        int camIdx = ui->cameraWidget ? ui->cameraWidget->currentCameraIndex() : 0;
+        FaceManagerDialog dlg(retinaPath, arcfacePath, dbPath, camIdx, this);
         dlg.exec();
+
+        // 人脸管理窗口也占用了摄像头，关闭后重启主窗口摄像头恢复实时画面
+        if (ui->cameraWidget) {
+            ui->cameraWidget->restartCamera();
+        }
     } catch (const std::exception& e) {
         QMessageBox::critical(this, QStringLiteral("人脸管理启动失败"),
             QStringLiteral("加载模型或初始化失败:\n%1").arg(QString::fromLocal8Bit(e.what())));
@@ -171,7 +232,6 @@ void MainWindow::onVideoToggled(bool checked)
     QString appDir = QCoreApplication::applicationDirPath();
     QString retinaPath = appDir + QStringLiteral("/models/retinaface.onnx");
     QString arcfacePath = appDir + QStringLiteral("/models/arcface_r50.onnx");
-    QString dbPath = appDir + QStringLiteral("/face.db");
 
     if (!QFile::exists(retinaPath) || !QFile::exists(arcfacePath)) {
         QMessageBox::warning(this, QStringLiteral("缺少模型"),
@@ -180,16 +240,12 @@ void MainWindow::onVideoToggled(bool checked)
     }
 
     // 延迟初始化模型（只执行一次）
-    static std::unique_ptr<FaceDetector> detector;
-    static std::unique_ptr<FaceAligner> aligner;
-    static std::unique_ptr<FaceRecognizer> recognizer;
-    static std::unique_ptr<FaceDatabase> db;
-    if (!detector) {
+    if (!g_detector) {
         try {
-            detector = std::make_unique<FaceDetector>(retinaPath.toStdString());
-            aligner = std::make_unique<FaceAligner>();
-            recognizer = std::make_unique<FaceRecognizer>(arcfacePath.toStdString());
-            db = std::make_unique<FaceDatabase>(dbPath);
+            g_detector   = std::make_unique<FaceDetector>(retinaPath.toStdString());
+            g_aligner    = std::make_unique<FaceAligner>();
+            g_recognizer = std::make_unique<FaceRecognizer>(arcfacePath.toStdString());
+            g_db         = std::make_unique<FaceDatabase>(appDir + QStringLiteral("/face.db"));
         } catch (const std::exception& e) {
             QMessageBox::critical(this, QStringLiteral("错误"),
                 QStringLiteral("模型加载失败: %1").arg(QString::fromLocal8Bit(e.what())));
@@ -197,69 +253,9 @@ void MainWindow::onVideoToggled(bool checked)
         }
     }
 
-    // 抓取一帧
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("无法打开摄像头"));
-        return;
-    }
-    cv::Mat frame;
-    cap >> frame;
-    cap.release();
-    if (frame.empty()) {
-        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("抓帧失败"));
-        return;
-    }
-
-    // 检测人脸
-    auto faces = detector->detect(frame);
-    if (faces.empty()) {
-        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("未检测到人脸"));
-        return;
-    }
-
-    // 对齐并提取特征
-    cv::Mat aligned = aligner->align(frame, faces[0].landmarks);
-    if (aligned.empty()) {
-        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("人脸对齐失败"));
-        return;
-    }
-    std::vector<float> feature = recognizer->extract(aligned);
-
-    // 与数据库比对（余弦相似度）
-    auto records = db->getAllFaceFeatures();
-    float best_sim = -1.0f;
-    QString best_name;
-    for (const auto& r : records) {
-        if (r.feature.size() != feature.size()) continue;
-        float dot = 0, na = 0, nb = 0;
-        for (size_t i = 0; i < feature.size(); ++i) {
-            dot += feature[i] * r.feature[i];
-            na += feature[i] * feature[i];
-            nb += r.feature[i] * r.feature[i];
-        }
-        if (na > 0 && nb > 0) {
-            float sim = dot / (std::sqrt(na) * std::sqrt(nb));
-            if (sim > best_sim) {
-                best_sim = sim;
-                best_name = r.person_name;
-            }
-        }
-    }
-
-    if (best_sim >= 0.70f) {
-        QString msg = QStringLiteral("识别到 %1 相似度 %2%")
-                          .arg(best_name)
-                          .arg(QString::number(best_sim * 100, 'f', 1));
-#ifdef HAS_TEXTTOSPEECH
-        QTextToSpeech tts;
-        tts.say(msg);
-#else
-        QMessageBox::information(this, QStringLiteral("识别结果"), msg);
-#endif
-    } else {
-        QMessageBox::information(this, QStringLiteral("提示"),
-            QStringLiteral("未匹配到已知人员"));
+    // 向 CameraWidget 请求实时流的一帧（异步，结果通过 frameCaptured 信号返回）
+    if (ui->cameraWidget) {
+        ui->cameraWidget->requestFrame();
     }
 #else
     Q_UNUSED(checked)
@@ -316,3 +312,122 @@ void MainWindow::onTranscriptionReceived(const QString &text)
         }
     });
 }
+
+#ifndef Q_OS_WASM
+void MainWindow::onFrameCapturedForFace(const QImage &frame)
+{
+    if (frame.isNull()) {
+        qWarning() << "Captured frame is null";
+        return;
+    }
+
+    // QImage -> cv::Mat (BGR)
+    cv::Mat mat;
+    switch (frame.format()) {
+        case QImage::Format_RGB888:
+            mat = cv::Mat(frame.height(), frame.width(), CV_8UC3,
+                          const_cast<uchar*>(frame.bits()), frame.bytesPerLine());
+            cv::cvtColor(mat, mat, cv::COLOR_RGB2BGR);
+            break;
+        case QImage::Format_ARGB32:
+        case QImage::Format_ARGB32_Premultiplied:
+        case QImage::Format_RGB32:
+            mat = cv::Mat(frame.height(), frame.width(), CV_8UC4,
+                          const_cast<uchar*>(frame.bits()), frame.bytesPerLine());
+            cv::cvtColor(mat, mat, cv::COLOR_BGRA2BGR);
+            break;
+        default:
+            qWarning() << "Unsupported QImage format:" << frame.format();
+#ifdef HAS_TEXTTOSPEECH
+            if (tts_) {
+                tts_->say(QStringLiteral("图像格式不支持"));
+            }
+#endif
+            return;
+    }
+
+    if (!g_detector || !g_aligner || !g_recognizer || !g_db) {
+        qWarning() << "Face models not initialized";
+        return;
+    }
+
+    // 检测人脸（可能多个）
+    auto faces = g_detector->detect(mat);
+    if (faces.empty()) {
+#ifdef HAS_TEXTTOSPEECH
+        if (tts_) {
+            tts_->say(QStringLiteral("未检测到人脸"));
+        }
+#else
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("未检测到人脸"));
+#endif
+        return;
+    }
+
+    // 预加载数据库，避免循环内重复查询
+    auto records = g_db->getAllFaceFeatures();
+    QStringList recognizedNames;
+    int unknownCount = 0;
+
+    // 逐个识别（不播报，只收集结果）
+    for (size_t i = 0; i < faces.size(); ++i) {
+        cv::Mat aligned = g_aligner->align(mat, faces[i].landmarks);
+        if (aligned.empty()) {
+            ++unknownCount;
+            continue;
+        }
+
+        std::vector<float> feature = g_recognizer->extract(aligned);
+
+        // 余弦相似度比对
+        float best_sim = -1.0f;
+        QString best_name;
+        for (const auto &r : records) {
+            if (r.feature.size() != feature.size()) continue;
+            float dot = 0, na = 0, nb = 0;
+            for (size_t j = 0; j < feature.size(); ++j) {
+                dot += feature[j] * r.feature[j];
+                na += feature[j] * feature[j];
+                nb += r.feature[j] * r.feature[j];
+            }
+            if (na > 0 && nb > 0) {
+                float sim = dot / (std::sqrt(na) * std::sqrt(nb));
+                if (sim > best_sim) {
+                    best_sim = sim;
+                    best_name = r.person_name;
+                }
+            }
+        }
+
+        if (best_sim >= 0.70f) {
+            recognizedNames.append(best_name);
+        } else {
+            ++unknownCount;
+        }
+    }
+
+    // 拼接成一句话，只播报一次
+    QString finalMsg;
+    int total = static_cast<int>(faces.size());
+    if (!recognizedNames.isEmpty() && unknownCount == 0) {
+        finalMsg = QStringLiteral("识别到 %1，共 %2 人")
+                       .arg(recognizedNames.join("、"))
+                       .arg(total);
+    } else if (!recognizedNames.isEmpty() && unknownCount > 0) {
+        finalMsg = QStringLiteral("识别到 %1，另有 %2 人未识别，共 %3 人")
+                       .arg(recognizedNames.join("、"))
+                       .arg(unknownCount)
+                       .arg(total);
+    } else {
+        finalMsg = QStringLiteral("检测到 %1 人，未识别出已知人员").arg(total);
+    }
+
+#ifdef HAS_TEXTTOSPEECH
+    if (tts_) {
+        tts_->say(finalMsg);
+    }
+#else
+    QMessageBox::information(this, QStringLiteral("识别结果"), finalMsg);
+#endif
+}
+#endif
