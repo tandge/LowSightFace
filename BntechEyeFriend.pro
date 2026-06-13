@@ -1,3 +1,13 @@
+requires(qtHaveModule(core))
+requires(qtHaveModule(gui))
+requires(qtHaveModule(widgets))
+requires(qtHaveModule(multimedia))
+requires(qtHaveModule(multimediawidgets))
+requires(qtHaveModule(sql))
+
+lessThan(QT_MAJOR_VERSION, 6): error(This project requires Qt 6.6 or newer)
+lessThan(QT_MINOR_VERSION, 6): error(This project requires Qt 6.6 or newer)
+
 QT += core gui widgets multimedia multimediawidgets sql
 
 qtHaveModule(texttospeech) {
@@ -9,6 +19,15 @@ TARGET = BntechEyeFriend
 TEMPLATE = app
 
 CONFIG += c++17
+
+# Add CONFIG+=static_exe when using a static Qt build.
+static_exe {
+    CONFIG += static
+    DEFINES += QT_STATIC
+    msvc:QMAKE_CFLAGS_RELEASE += /MT
+    msvc:QMAKE_CXXFLAGS_RELEASE += /MT
+    msvc:QMAKE_LFLAGS_RELEASE += /INCREMENTAL:NO
+}
 
 msvc:QMAKE_CXXFLAGS += /utf-8
 

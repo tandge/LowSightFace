@@ -1,5 +1,8 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 project(BntechEyeFriend VERSION 1.0.0 LANGUAGES CXX)
+
+option(BNEF_STATIC_EXE "Build a statically linked single EXE (requires static Qt/OpenCV/ONNX Runtime)" OFF)
+option(BNEF_WASM_USE_PREBUILT_RUNTIME "Use prebuilt OpenCV/ONNX Runtime web files beside the Qt WASM app" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,31 +10,107 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# Qt5 WASM configuration
-find_package(Qt5 REQUIRED COMPONENTS
+# 默认使用 C:\Qt6.6。该目录可以是 Qt prefix 本身，也可以包含 6.6.x/msvc*_64* 子目录。
+if(WIN32 AND NOT CMAKE_PREFIX_PATH)
+    file(GLOB _qt66_candidates
+        "C:/Qt6.6"
+        "C:/Qt6.6/6.6*/msvc*_64*"
+        "C:/Qt6.6/msvc*_64*"
+        "C:/Qt6.6/6.6*/mingw*_64*"
+        "C:/Qt6.6/mingw*_64*"
+    )
+    if(_qt66_candidates)
+        list(APPEND CMAKE_PREFIX_PATH ${_qt66_candidates})
+    endif()
+endif()
+
+if(BNEF_STATIC_EXE)
+    set(BUILD_SHARED_LIBS OFF)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .a)
+    if(MSVC)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+    add_compile_definitions(QT_STATIC)
+endif()
+
+set(_bnef_qt_required_components
     Core
     Gui
     Widgets
     Multimedia
     MultimediaWidgets
-    Sql
 )
+if(NOT EMSCRIPTEN)
+    list(APPEND _bnef_qt_required_components Sql)
+endif()
+find_package(Qt6 6.6 REQUIRED COMPONENTS ${_bnef_qt_required_components})
+qt_standard_project_setup()
 
 # 可选: 语音合成模块
-find_package(Qt5 COMPONENTS TextToSpeech)
-if(Qt5TextToSpeech_FOUND)
-    message(STATUS "Qt5 TextToSpeech found")
+find_package(Qt6 6.6 COMPONENTS TextToSpeech)
+if(Qt6TextToSpeech_FOUND)
+    message(STATUS "Qt6 TextToSpeech found")
 else()
-    message(WARNING "Qt5 TextToSpeech NOT found - voice playback disabled")
+    message(WARNING "Qt6 TextToSpeech NOT found - voice playback disabled")
+endif()
+
+if(EMSCRIPTEN)
+    message(STATUS "Configuring Qt WebAssembly build")
+    if(BNEF_WASM_USE_PREBUILT_RUNTIME)
+        set(OPENCV_WASM_DIR "$ENV{OPENCV_WASM_DIR}" CACHE PATH "OpenCV WASM build directory")
+        if(NOT OPENCV_WASM_DIR)
+            set(OPENCV_WASM_DIR "C:/opencv/opencv/build_wasm" CACHE PATH "OpenCV WASM build directory" FORCE)
+        endif()
+        set(ONNXRUNTIME_WASM_DIR "$ENV{ONNXRUNTIME_WASM_DIR}" CACHE PATH "ONNX Runtime WASM directory")
+        if(NOT ONNXRUNTIME_WASM_DIR)
+            set(ONNXRUNTIME_WASM_DIR "C:/onnxruntime/wasm" CACHE PATH "ONNX Runtime WASM directory" FORCE)
+        endif()
+        message(STATUS "OpenCV WASM runtime directory: ${OPENCV_WASM_DIR}")
+        message(STATUS "ONNX Runtime WASM runtime directory: ${ONNXRUNTIME_WASM_DIR}")
+    endif()
 endif()
 
 if(NOT EMSCRIPTEN)
-    find_package(OpenCV REQUIRED)
+    if(WIN32 AND NOT OpenCV_DIR AND EXISTS "C:/opencv/opencv/build/OpenCVConfig.cmake")
+        set(OpenCV_DIR "C:/opencv/opencv/build" CACHE PATH "OpenCV package directory")
+    endif()
+    if(BNEF_STATIC_EXE)
+        set(OpenCV_STATIC ON)
+    endif()
+
+    find_package(OpenCV QUIET)
+    if(NOT OpenCV_FOUND AND WIN32)
+        message(WARNING "OpenCVConfig.cmake did not match this MSVC version; falling back to opencv_world library lookup.")
+        set(_opencv_root "$ENV{OPENCV_DIR}")
+        if(NOT _opencv_root)
+            set(_opencv_root "C:/opencv/opencv/build")
+        endif()
+        find_path(OpenCV_INCLUDE_DIRS NAMES opencv2/opencv.hpp
+                  PATHS ${_opencv_root}/include C:/opencv/opencv/build/include)
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            find_library(OpenCV_WORLD_LIB NAMES opencv_world490d opencv_world4100d opencv_world480d
+                         PATHS ${_opencv_root}/x64/vc16/lib ${_opencv_root}/x64/vc17/lib)
+        else()
+            find_library(OpenCV_WORLD_LIB NAMES opencv_world490 opencv_world4100 opencv_world480
+                         PATHS ${_opencv_root}/x64/vc16/lib ${_opencv_root}/x64/vc17/lib)
+        endif()
+        if(OpenCV_INCLUDE_DIRS AND OpenCV_WORLD_LIB)
+            set(OpenCV_FOUND TRUE)
+            set(OpenCV_LIBS ${OpenCV_WORLD_LIB})
+            message(STATUS "OpenCV fallback include: ${OpenCV_INCLUDE_DIRS}")
+            message(STATUS "OpenCV fallback lib: ${OpenCV_WORLD_LIB}")
+        endif()
+    endif()
+    if(NOT OpenCV_FOUND)
+        message(FATAL_ERROR "OpenCV not found. Set OpenCV_DIR or OPENCV_DIR to your OpenCV build directory.")
+    endif()
     find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_cxx_api.h
               PATHS $ENV{ONNXRUNTIME_DIR}/include
+                    C:/onnxruntime/include
                     ${CMAKE_SOURCE_DIR}/third_party/onnxruntime/include)
-    find_library(ONNXRUNTIME_LIB NAMES onnxruntime
+    find_library(ONNXRUNTIME_LIB NAMES onnxruntime_static onnxruntime
                  PATHS $ENV{ONNXRUNTIME_DIR}/lib
+                       C:/onnxruntime/lib
                        ${CMAKE_SOURCE_DIR}/third_party/onnxruntime/lib)
     if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB)
         message(FATAL_ERROR "ONNX Runtime not found. Set ONNXRUNTIME_DIR environment variable or place it in third_party/onnxruntime.")
@@ -75,37 +154,25 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-if(EMSCRIPTEN)
-    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${FORMS})
+qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION WIN32 ${SOURCES} ${HEADERS} ${FORMS})
 
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Multimedia
+    Qt6::MultimediaWidgets
+)
+
+if(NOT EMSCRIPTEN)
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        Qt5::Core
-        Qt5::Gui
-        Qt5::Widgets
-        Qt5::Multimedia
-        Qt5::MultimediaWidgets
-    )
-
-    # WASM-specific linker flags
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        LINK_FLAGS "-s WASM=1 -s USE_QT5=1 -s TOTAL_MEMORY=268435456 -s ALLOW_MEMORY_GROWTH=1 --preload-file ${CMAKE_SOURCE_DIR}/assets@/assets -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s EXPORTED_FUNCTIONS=['_main','_malloc','_free'] -s ASYNCIFY=1 -s ASYNCIFY_IGNORE_INDIRECT=1"
-    )
-else()
-    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${FORMS})
-
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        Qt5::Core
-        Qt5::Gui
-        Qt5::Widgets
-        Qt5::Multimedia
-        Qt5::MultimediaWidgets
-        Qt5::Sql
+        Qt6::Sql
         ${OpenCV_LIBS}
         ${ONNXRUNTIME_LIB}
     )
 
-    if(Qt5TextToSpeech_FOUND)
-        target_link_libraries(${PROJECT_NAME} PRIVATE Qt5::TextToSpeech)
+    if(Qt6TextToSpeech_FOUND)
+        target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::TextToSpeech)
         target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_TEXTTOSPEECH)
     endif()
 
@@ -118,5 +185,46 @@ endif()
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/client
 )
+
+if(EMSCRIPTEN)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BNEF_WASM_BUILD)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sINITIAL_MEMORY=128MB"
+        "-sMAXIMUM_MEMORY=2GB"
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
+endif()
+
+if(BNEF_STATIC_EXE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    if(MSVC)
+        target_link_options(${PROJECT_NAME} PRIVATE /INCREMENTAL:NO)
+    endif()
+
+    # Link common Qt static plugins when they are available in the static Qt kit.
+    set(_bnef_qt_static_plugins)
+    foreach(_plugin IN ITEMS
+        Qt6::QWindowsIntegrationPlugin
+        Qt6::QWindowsVistaStylePlugin
+        Qt6::QSQLiteDriverPlugin
+        Qt6::QWindowsMediaPlugin
+        Qt6::QTextToSpeechSapiPlugin
+    )
+        if(TARGET ${_plugin})
+            list(APPEND _bnef_qt_static_plugins ${_plugin})
+        endif()
+    endforeach()
+    if(_bnef_qt_static_plugins)
+        qt_import_plugins(${PROJECT_NAME} INCLUDE ${_bnef_qt_static_plugins})
+    endif()
+endif()
+
+qt_finalize_executable(${PROJECT_NAME})
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

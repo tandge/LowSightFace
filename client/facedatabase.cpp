@@ -38,7 +38,7 @@ bool FaceDatabase::initSchema() {
     file.close();
 
     // 按分号分割成多条 SQL 语句
-    QStringList statements = content.split(';', QString::SkipEmptyParts);
+    QStringList statements = content.split(';', Qt::SkipEmptyParts);
     QSqlQuery query(db_);
 
     for (QString stmt : statements) {

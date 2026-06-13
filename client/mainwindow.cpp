@@ -35,8 +35,14 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QMessageBox>
-#include <QCameraInfo>
+#include <QCameraDevice>
+#include <QMediaDevices>
+#include <QByteArray>
 #include <memory>
+
+#ifdef Q_OS_WASM
+#include <emscripten/emscripten.h>
+#endif
 
 #ifndef Q_OS_WASM
 namespace {
@@ -44,6 +50,44 @@ namespace {
     std::unique_ptr<FaceAligner>    g_aligner;
     std::unique_ptr<FaceRecognizer> g_recognizer;
     std::unique_ptr<FaceDatabase>   g_db;
+}
+#else
+namespace {
+void speakInBrowser(const QString &text)
+{
+    const QByteArray utf8 = text.toUtf8();
+    const char *message = utf8.constData();
+    EM_ASM({
+        const text = UTF8ToString($0);
+        if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+            console.warn('Web Speech API is not available in this browser.');
+            return;
+        }
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        const selectVoiceAndSpeak = () => {
+            const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+            const preferredVoice = voices.find(v => /zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));
+            if (preferredVoice) {
+                utterance.voice = preferredVoice;
+            }
+            window.speechSynthesis.speak(utterance);
+        };
+
+        if (window.speechSynthesis.getVoices && window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = selectVoiceAndSpeak;
+            setTimeout(selectVoiceAndSpeak, 200);
+        } else {
+            selectVoiceAndSpeak();
+        }
+    }, message);
+}
 }
 #endif
 
@@ -107,12 +151,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 枚举摄像头设备并填充顶部下拉框
     if (ui->cameraComboBox) {
-        QList<QCameraInfo> cameras = QCameraInfo::availableCameras();
-        for (const QCameraInfo &info : cameras) {
-            QString label = info.description();
-            if (info.position() == QCamera::FrontFace)
+        const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
+        for (const QCameraDevice &device : cameras) {
+            QString label = device.description();
+            if (device.position() == QCameraDevice::FrontFace)
                 label += QStringLiteral(" [前置]");
-            else if (info.position() == QCamera::BackFace)
+            else if (device.position() == QCameraDevice::BackFace)
                 label += QStringLiteral(" [后置]");
             ui->cameraComboBox->addItem(label);
         }
@@ -161,6 +205,9 @@ void MainWindow::onMicrophoneToggled(bool checked)
         if (tts_) {
             tts_->say(QStringLiteral("打开麦克风"));
         }
+#endif
+#ifdef Q_OS_WASM
+        speakInBrowser(QStringLiteral("打开麦克风"));
 #endif
         ui->pulseDots->startAnimation();
         ui->voiceHintLabel->setText(QStringLiteral("正在倾听..."));
@@ -213,6 +260,15 @@ void MainWindow::onSendClicked()
             QStringLiteral("加载模型或初始化失败:\n%1").arg(QString::fromLocal8Bit(e.what())));
     }
 #else
+    auto *messageBox = new QMessageBox(
+        QMessageBox::Information,
+        QStringLiteral("Web 版本提示"),
+        QStringLiteral("人脸管理暂不支持 WebAssembly 版本。"),
+        QMessageBox::Ok,
+        this);
+    messageBox->setAttribute(Qt::WA_DeleteOnClose);
+    messageBox->open();
+
     ui->voiceHintLabel->setText(QStringLiteral("人脸管理不支持 Web 版本"));
     QTimer::singleShot(2000, this, [this]() {
         ui->voiceHintLabel->setText(is_mic_active_ ? QStringLiteral("正在倾听...")

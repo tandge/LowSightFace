@@ -1,8 +1,8 @@
 /**
  * @file camerawidget.h
- * @brief 摄像头实时画面组件
+ * @brief 摄像头实时画面组件 (Qt6)
  *
- * 使用 Qt Multimedia 模块实现摄像头画面采集与显示。
+ * 使用 Qt6 Multimedia 模块实现摄像头画面采集与显示。
  * 支持拍照截图、视频录制功能。
  */
 
@@ -11,9 +11,11 @@
 
 #include <QWidget>
 #include <QCamera>
-#include <QCameraViewfinder>
-#include <QCameraImageCapture>
+#include <QCameraDevice>
+#include <QImageCapture>
+#include <QMediaCaptureSession>
 #include <QMediaRecorder>
+#include <QVideoSink>
 #include <QImage>
 
 class CameraWidget : public QWidget
@@ -43,12 +45,13 @@ protected:
 
 private:
     void initCamera();
-    bool findDefaultCamera();
 
     QCamera *camera_;
-    QCameraViewfinder *viewfinder_;
-    QCameraImageCapture *image_capture_;
+    QMediaCaptureSession *capture_session_;
+    QImageCapture *image_capture_;
     QMediaRecorder *media_recorder_;
+    QVideoSink *video_sink_;
+    QImage current_frame_;
     int current_volume_;
     int current_camera_index_;
 };
