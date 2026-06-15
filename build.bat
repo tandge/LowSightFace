@@ -103,27 +103,24 @@ call :resolve_wasm_env || exit /b 1
 set "OUT=!ROOT!\build\!DIR!"
 set "BIN=!OUT!"
 echo [INFO] Build dir = !OUT!
-if exist "!OUT!" (
-    echo [INFO] Removing old WASM build directory.
-    rmdir /s /q "!OUT!"
-    if exist "!OUT!" (
-        echo [ERROR] Cannot remove old WASM build directory: !OUT!
-        echo [HINT] Close any browser tab, python http.server, cmd window, Explorer window,
-        echo        editor, antivirus scan, or other process using files under this directory.
-        echo [HINT] Then run build again, or manually delete the directory above.
-        pause
-        goto menu
-    )
-)
 if not exist "!OUT!" mkdir "!OUT!"
 if errorlevel 1 (echo [ERROR] Cannot create WASM build directory& pause& goto menu)
 
 set "PATH=!WASM_CMAKE_DIR!;!WASM_NINJA_DIR!;!EMSDK!;!EMSDK!\upstream\emscripten;!WASM_QT_KIT!\bin;%PATH%"
 set "CC=!EMSDK!\upstream\emscripten\emcc.bat"
 set "CXX=!EMSDK!\upstream\emscripten\em++.bat"
+
+rem 检测 CPU 核心数并设置合理的并行编译数
+for /f %%i in ('wmic cpu get NumberOfLogicalProcessors /format:value') do (
+    for /f %%j in ("%%i") do set "%%j"
+)
+if not defined NumberOfLogicalProcessors set "NumberOfLogicalProcessors=8"
+set "PARALLEL_JOBS=%NumberOfLogicalProcessors%"
+echo [INFO] Using %PARALLEL_JOBS% parallel build jobs.
+
 call "!WASM_QT_KIT!\bin\qt-cmake.bat" -S "!SRC!" -B "!OUT!" -G Ninja -DCMAKE_MAKE_PROGRAM="!WASM_NINJA!" -DCMAKE_BUILD_TYPE=!TYPE! -DCMAKE_PREFIX_PATH="!WASM_QT_KIT!" -DQT_HOST_PATH="!WASM_QT_HOST_PATH!" -DBNEF_STATIC_EXE=OFF
 if errorlevel 1 (echo [ERROR] WASM CMake configure failed& pause& goto menu)
-"!WASM_CMAKE!" --build "!OUT!" --config !TYPE! --parallel
+"!WASM_CMAKE!" --build "!OUT!" --config !TYPE! --parallel %PARALLEL_JOBS%
 if errorlevel 1 (echo [ERROR] WASM build failed& pause& goto menu)
 call :copy_wasm_runtime "!BIN!"
 call :copy_runtime_data "!BIN!"

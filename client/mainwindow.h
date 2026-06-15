@@ -22,6 +22,9 @@
 #include <QMainWindow>
 #include <QTimer>
 #include <QDateTime>
+#include <QRectF>
+#include <QVector>
+#include <QListWidgetItem>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -56,6 +59,11 @@ private slots:
 #endif
 
 private:
+    void refreshCameraDevices();              // 刷新摄像头下拉列表，WASM 授权后会重新调用
+#ifdef Q_OS_WASM
+    void runWasmRetinaFaceDetection(bool continuousMode = false); // WASM RetinaFace 人脸框标记
+#endif
+
     // 由 uic 从 mainwindow.ui 自动生成的控件容器
     Ui::MainWindow *ui;
 
@@ -71,6 +79,13 @@ private:
     bool is_mic_active_;
     bool is_video_recording_;
     bool is_call_active_;   // 通话状态 (是否处于活动会话中)
+    bool keep_camera_combo_visible_; // WASM 打开摄像头后保持设备列表可见，便于用户切换
+#ifdef Q_OS_WASM
+    bool wasm_face_detection_busy_;
+    bool wasm_realtime_face_detection_enabled_;
+    bool wasm_face_marking_enabled_; // 仅 Shot/Zoom 流程允许写入人脸标记，Cam 只打开摄像头
+    QTimer *wasm_face_detection_timer_;
+#endif
 
     // 时间刷新定时器
     QTimer *clock_timer_;

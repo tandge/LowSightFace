@@ -47,6 +47,9 @@ HEADERS += \
 FORMS += \
     client/mainwindow.ui
 
+RESOURCES += \
+    client/resources.qrc
+
 INCLUDEPATH += client
 
 !wasm {
@@ -82,7 +85,22 @@ INCLUDEPATH += client
 }
 
 wasm {
+    # 编译优化
+    QMAKE_CXXFLAGS += -O2 -ffast-math -fno-exceptions -fno-rtti
+    QMAKE_CFLAGS += -O2 -ffast-math -fno-exceptions -fno-rtti
+
+    # 链接优化
     QMAKE_LFLAGS += -s TOTAL_MEMORY=268435456 -s ALLOW_MEMORY_GROWTH=1
+    QMAKE_LFLAGS += -s ASYNCIFY=1 -lidbfs.js
     QMAKE_LFLAGS += -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap]
     QMAKE_LFLAGS += -s EXPORTED_FUNCTIONS=[_main,_malloc,_free]
+    QMAKE_LFLAGS += -O2
+    QMAKE_LFLAGS += -sNO_DISABLE_EXCEPTION_CATCHING=0
+    QMAKE_LFLAGS += -sDISABLE_EXCEPTION_CATCHING=1
+    QMAKE_LFLAGS += -sASSERTIONS=0
+    QMAKE_LFLAGS += -sWASM=1
+    QMAKE_LFLAGS += -sMODULARIZE=0
+    QMAKE_LFLAGS += -sEXPORT_ALL=0
+    QMAKE_LFLAGS += -sSTRICT=0
+    QMAKE_LFLAGS += -flto
 }

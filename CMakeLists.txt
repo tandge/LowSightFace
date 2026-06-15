@@ -137,6 +137,10 @@ set(FORMS
     client/mainwindow.ui
 )
 
+set(RESOURCES
+    client/resources.qrc
+)
+
 if(NOT EMSCRIPTEN)
     list(APPEND SOURCES
         client/facedetector.cpp
@@ -154,7 +158,7 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION WIN32 ${SOURCES} ${HEADERS} ${FORMS})
+qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION WIN32 ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
@@ -188,11 +192,37 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 if(EMSCRIPTEN)
     target_compile_definitions(${PROJECT_NAME} PRIVATE BNEF_WASM_BUILD)
+
+    # 编译优化参数
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        "-O2"  # 使用 O2 优化（比 O3 快，且效果接近）
+        "-ffast-math"  # 启用快速数学运算
+        "-fno-exceptions"  # 禁用异常（如果代码中不需要）
+        "-fno-rtti"  # 禁用 RTTI（如果代码中不需要）
+    )
+
+    # 链接优化参数
     target_link_options(${PROJECT_NAME} PRIVATE
         "-sALLOW_MEMORY_GROWTH=1"
         "-sINITIAL_MEMORY=128MB"
         "-sMAXIMUM_MEMORY=2GB"
+        "-sASYNCIFY=1"
+        "-lidbfs.js"
+        "-O2"  # 链接时优化
+        "-sNO_DISABLE_EXCEPTION_CATCHING=0"  # 禁用异常捕获
+        "-sDISABLE_EXCEPTION_CATCHING=1"
+        "-sASSERTIONS=0"  # 禁用断言检查
+        "-sWASM=1"  # 强制生成 wasm（默认，但明确指定）
+        "-sMODULARIZE=0"  # 不使用模块化
+        "-sEXPORT_ALL=0"  # 不导出所有符号
+        "-sSTRICT=0"  # 禁用严格模式检查
+        "-sNO_FILESYSTEM=0"  # 保留文件系统支持（因为使用了 idbfs.js）
+        "-flto"  # 启用链接时优化
     )
+
+    # 并行编译参数
+    set(CMAKE_CXX_COMPILER_LAUNCHER "em++")
+    set(CMAKE_C_COMPILER_LAUNCHER "emcc")
 endif()
 
 if(MSVC)

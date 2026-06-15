@@ -17,6 +17,7 @@
 #include "camerawidget.h"
 #include "pulsedots.h"
 #include "whisperclient.h"
+#include <QListWidgetItem>
 
 #ifndef Q_OS_WASM
 #include "facemanagerdialog.h"
@@ -38,7 +39,23 @@
 #include <QCameraDevice>
 #include <QMediaDevices>
 #include <QByteArray>
+#include <QBuffer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QAbstractItemView>
+#ifdef Q_OS_WASM
+#include <QApplication>
+#include <QFont>
+#include <QFontDatabase>
+#include <QStringList>
+#endif
 #include <memory>
+#ifdef Q_OS_WASM
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#endif
 
 #ifdef Q_OS_WASM
 #include <emscripten/emscripten.h>
@@ -53,6 +70,16 @@ namespace {
 }
 #else
 namespace {
+char *duplicateCString(const std::string &text)
+{
+    char *result = static_cast<char *>(std::malloc(text.size() + 1));
+    if (!result) {
+        return nullptr;
+    }
+    std::memcpy(result, text.c_str(), text.size() + 1);
+    return result;
+}
+
 void speakInBrowser(const QString &text)
 {
     const QByteArray utf8 = text.toUtf8();
@@ -88,6 +115,309 @@ void speakInBrowser(const QString &text)
         }
     }, message);
 }
+
+EM_ASYNC_JS(char *, wasmEnumerateVideoDevices, (), {
+    function makeCString(text) {
+        const length = lengthBytesUTF8(text) + 1;
+        const ptr = _malloc(length);
+        stringToUTF8(text, ptr, length);
+        return ptr;
+    }
+
+    async function enumerateCameras() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        console.log('All media devices:', devices);
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        console.log('Video devices found:', videoDevices);
+        return videoDevices;
+    }
+
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+            console.error('enumerateDevices not available');
+            return makeCString(JSON.stringify({ ok: false, error: 'enumerateDevices is not available' }));
+        }
+
+        // 强制获取权限，确保能获取设备标签和完整列表
+        let cameraDevices = await enumerateCameras();
+        const hasNamedCamera = cameraDevices.some(device => device.label && device.label.trim().length > 0);
+
+        console.log('Initial camera count:', cameraDevices.length);
+        console.log('Initial camera details:', cameraDevices);
+
+        if ((!cameraDevices.length || !hasNamedCamera) && navigator.mediaDevices.getUserMedia) {
+            const hasLiveStream = window.bnefCameraStream
+                && window.bnefCameraStream.getVideoTracks().some(track => track.readyState === 'live');
+            if (!hasLiveStream) {
+                try {
+                    console.log('Requesting camera permission to get full device info');
+                    window.bnefCameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    console.log('Camera permission granted');
+                } catch (permissionError) {
+                    console.warn('Permission request failed:', permissionError);
+                }
+            }
+            cameraDevices = await enumerateCameras();
+            console.log('Camera count after permission:', cameraDevices.length);
+            console.log('Camera details after permission:', cameraDevices);
+        }
+
+        const cameras = cameraDevices.map((device, index) => ({
+            label: device.label && device.label.trim() !== '' ? device.label : `摄像头 ${index + 1}`,
+            deviceId: device.deviceId || `device_${index}`,
+            groupId: device.groupId || `group_${index}`
+        }));
+
+        console.log('Final camera list to return:', cameras);
+
+        return makeCString(JSON.stringify({ ok: true, devices: cameras }));
+    } catch (error) {
+        console.warn('Failed to enumerate camera devices:', error);
+        return makeCString(JSON.stringify({
+            ok: false,
+            error: String(error && error.message ? error.message : error)
+        }));
+    }
+});
+
+EM_ASYNC_JS(char *, wasmRunRetinaFaceOnPng, (const char *pngDataUrlPtr), {
+    const pngDataUrl = UTF8ToString(pngDataUrlPtr);
+    const modelUrl = 'models/retinaface.onnx';
+    const absoluteModelUrl = 'https://bynbj.com/tools/eye_friend/models/retinaface.onnx';
+    const modelPath = '/models/retinaface.onnx';
+    const ortScriptUrl = 'onnxruntime/ort.min.js';
+    const inputSize = 640;
+    const confThreshold = 0.5;
+    const nmsThreshold = 0.4;
+
+    function makeCString(text) {
+        const length = lengthBytesUTF8(text) + 1;
+        const ptr = _malloc(length);
+        stringToUTF8(text, ptr, length);
+        return ptr;
+    }
+
+    function ok(boxes) {
+        return JSON.stringify({ ok: true, boxes });
+    }
+
+    function fail(message) {
+        return JSON.stringify({ ok: false, error: String(message || 'unknown error') });
+    }
+
+    function loadScript(url) {
+        return new Promise((resolve, reject) => {
+            const existing = document.querySelector(`script[data-bnef-src="${url}"]`);
+            if (existing) {
+                if (existing.dataset.loaded === '1') resolve();
+                else existing.addEventListener('load', resolve, { once: true });
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = url;
+            script.async = true;
+            script.dataset.bnefSrc = url;
+            script.onload = () => { script.dataset.loaded = '1'; resolve(); };
+            script.onerror = () => reject(new Error(`failed to load ${url}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function syncFs(populate) {
+        return new Promise((resolve, reject) => {
+            FS.syncfs(populate, err => err ? reject(err) : resolve());
+        });
+    }
+
+    async function ensureModel() {
+        try { FS.mkdir('/models'); } catch (e) {}
+        try { await syncFs(true); } catch (e) { console.warn('IDBFS populate failed:', e); }
+        try {
+            const stat = FS.stat(modelPath);
+            if (stat && stat.size > 1024) return modelPath;
+        } catch (e) {}
+
+        let response = await fetch(modelUrl, { credentials: 'same-origin' });
+        if (!response.ok) {
+            response = await fetch(absoluteModelUrl, { mode: 'cors' });
+        }
+        if (!response.ok) {
+            throw new Error(`failed to download retinaface.onnx: HTTP ${response.status}`);
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        FS.writeFile(modelPath, bytes);
+        try { await syncFs(false); } catch (e) { console.warn('IDBFS flush failed:', e); }
+        return modelPath;
+    }
+
+    async function decodeImage() {
+        const image = new Image();
+        image.decoding = 'async';
+        await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () => reject(new Error('failed to decode image'));
+            image.src = pngDataUrl;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = inputSize;
+        canvas.height = inputSize;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0, inputSize, inputSize);
+        const data = ctx.getImageData(0, 0, inputSize, inputSize).data;
+        const input = new Float32Array(3 * inputSize * inputSize);
+        const plane = inputSize * inputSize;
+        for (let y = 0; y < inputSize; ++y) {
+            for (let x = 0; x < inputSize; ++x) {
+                const src = (y * inputSize + x) * 4;
+                const dst = y * inputSize + x;
+                input[dst] = data[src];
+                input[plane + dst] = data[src + 1];
+                input[plane * 2 + dst] = data[src + 2];
+            }
+        }
+        return { image, input };
+    }
+
+    function generatePriors() {
+        const minSizes = [[16, 32], [64, 128], [256, 512]];
+        const steps = [8, 16, 32];
+        const priors = [];
+        for (let k = 0; k < steps.length; ++k) {
+            const f = Math.floor(inputSize / steps[k]);
+            for (let i = 0; i < f; ++i) {
+                for (let j = 0; j < f; ++j) {
+                    for (const minSize of minSizes[k]) {
+                        priors.push([(j + 0.5) * steps[k] / inputSize,
+                                     (i + 0.5) * steps[k] / inputSize,
+                                     minSize / inputSize,
+                                     minSize / inputSize]);
+                    }
+                }
+            }
+        }
+        return priors;
+    }
+
+    function iou(a, b) {
+        const x1 = Math.max(a.x1, b.x1);
+        const y1 = Math.max(a.y1, b.y1);
+        const x2 = Math.min(a.x2, b.x2);
+        const y2 = Math.min(a.y2, b.y2);
+        const w = Math.max(0, x2 - x1);
+        const h = Math.max(0, y2 - y1);
+        const inter = w * h;
+        const areaA = Math.max(0, a.x2 - a.x1) * Math.max(0, a.y2 - a.y1);
+        const areaB = Math.max(0, b.x2 - b.x1) * Math.max(0, b.y2 - b.y1);
+        return inter / Math.max(1e-6, areaA + areaB - inter);
+    }
+
+    function nms(boxes) {
+        boxes.sort((a, b) => b.score - a.score);
+        const picked = [];
+        for (const box of boxes) {
+            if (picked.every(existing => iou(box, existing) <= nmsThreshold)) {
+                picked.push(box);
+            }
+        }
+        return picked;
+    }
+
+    function tensorData(output, names, index) {
+        if (names[index] && output[names[index]]) return output[names[index]].data;
+        const values = Object.values(output);
+        return values[index] ? values[index].data : null;
+    }
+
+    function decodeOutputs(output) {
+        const names = Object.keys(output);
+        const out0 = tensorData(output, names, 0);
+        const out1 = tensorData(output, names, 1);
+        const priors = generatePriors();
+        const boxes = [];
+
+        if (names.length >= 3 && out0 && out1) {
+            const bbox = out0;
+            const conf = out1;
+            const count = Math.min(priors.length, Math.floor(bbox.length / 4), Math.floor(conf.length / 2));
+            for (let i = 0; i < count; ++i) {
+                const score = conf[i * 2 + 1];
+                if (score < confThreshold) continue;
+                const [cx, cy, w, h] = priors[i];
+                const dx = bbox[i * 4 + 0];
+                const dy = bbox[i * 4 + 1];
+                const dw = bbox[i * 4 + 2];
+                const dh = bbox[i * 4 + 3];
+                const predCx = cx + dx * 0.1 * w;
+                const predCy = cy + dy * 0.1 * h;
+                const predW = w * Math.exp(dw * 0.2);
+                const predH = h * Math.exp(dh * 0.2);
+                boxes.push({
+                    x1: Math.max(0, predCx - predW * 0.5),
+                    y1: Math.max(0, predCy - predH * 0.5),
+                    x2: Math.min(1, predCx + predW * 0.5),
+                    y2: Math.min(1, predCy + predH * 0.5),
+                    score
+                });
+            }
+        } else {
+            const mergedTensor = Object.values(output)[0];
+            const data = mergedTensor && mergedTensor.data;
+            const dims = mergedTensor && mergedTensor.dims;
+            const cols = dims && dims.length >= 3 ? dims[2] : 15;
+            const count = data ? Math.min(priors.length, Math.floor(data.length / cols)) : 0;
+            for (let i = 0; i < count; ++i) {
+                const score = data[i * cols + 4];
+                if (score < confThreshold) continue;
+                const [cx, cy, w, h] = priors[i];
+                const dx = data[i * cols + 0];
+                const dy = data[i * cols + 1];
+                const dw = data[i * cols + 2];
+                const dh = data[i * cols + 3];
+                const predCx = cx + dx * 0.1 * w;
+                const predCy = cy + dy * 0.1 * h;
+                const predW = w * Math.exp(dw * 0.2);
+                const predH = h * Math.exp(dh * 0.2);
+                boxes.push({
+                    x1: Math.max(0, predCx - predW * 0.5),
+                    y1: Math.max(0, predCy - predH * 0.5),
+                    x2: Math.min(1, predCx + predW * 0.5),
+                    y2: Math.min(1, predCy + predH * 0.5),
+                    score
+                });
+            }
+        }
+        return nms(boxes).map(b => ({ x: b.x1, y: b.y1, w: b.x2 - b.x1, h: b.y2 - b.y1, score: b.score }));
+    }
+
+    try {
+        if (!FS.analyzePath('/models').exists) {
+            FS.mkdir('/models');
+        }
+        if (!FS.filesystems.IDBFS) {
+            console.warn('IDBFS is not available; model cache will be memory-only.');
+        } else if (!FS.analyzePath('/models').object.mounted) {
+            try { FS.mount(IDBFS, {}, '/models'); } catch (e) {}
+        }
+
+        await loadScript(ortScriptUrl);
+        if (!self.ort) throw new Error('onnxruntime-web did not initialize');
+        ort.env.wasm.wasmPaths = 'onnxruntime/';
+        ort.env.wasm.numThreads = 1;
+        const path = await ensureModel();
+        const modelBytes = FS.readFile(path);
+        const { input } = await decodeImage();
+        const session = window.bnefRetinaFaceSession || await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] });
+        window.bnefRetinaFaceSession = session;
+        const inputName = session.inputNames[0];
+        const feeds = {};
+        feeds[inputName] = new ort.Tensor('float32', input, [1, 3, inputSize, inputSize]);
+        const output = await session.run(feeds);
+        return makeCString(ok(decodeOutputs(output)));
+    } catch (error) {
+        console.error('RetinaFace WASM detection failed:', error);
+        return makeCString(fail(error && error.message ? error.message : error));
+    }
+});
 }
 #endif
 
@@ -99,6 +429,13 @@ MainWindow::MainWindow(QWidget *parent)
     , is_mic_active_(false)
     , is_video_recording_(false)
     , is_call_active_(true)
+    , keep_camera_combo_visible_(false)
+#ifdef Q_OS_WASM
+    , wasm_face_detection_busy_(false)
+    , wasm_realtime_face_detection_enabled_(false)
+    , wasm_face_marking_enabled_(false)
+    , wasm_face_detection_timer_(nullptr)
+#endif
     , clock_timer_(nullptr)
 {
     // 由 uic 生成的 setupUi() 一次性构造全部子控件 / 布局 / 样式
@@ -149,31 +486,76 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->videoButton,   &QPushButton::toggled, this, &MainWindow::onVideoToggled);
     connect(ui->endCallButton, &QPushButton::clicked, this, &MainWindow::onEndCallClicked);
 
-    // 枚举摄像头设备并填充顶部下拉框
-    if (ui->cameraComboBox) {
-        const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
-        for (const QCameraDevice &device : cameras) {
-            QString label = device.description();
-            if (device.position() == QCameraDevice::FrontFace)
-                label += QStringLiteral(" [前置]");
-            else if (device.position() == QCameraDevice::BackFace)
-                label += QStringLiteral(" [后置]");
-            ui->cameraComboBox->addItem(label);
+#ifdef Q_OS_WASM
+    const int fontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/NotoSansSC-VF.ttf"));
+    QString wasmFontFamily = QStringLiteral("sans-serif");
+    if (fontId >= 0) {
+        const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+        if (!families.isEmpty()) {
+            wasmFontFamily = families.first();
+            QFont wasmFont(wasmFontFamily);
+            wasmFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
+            qApp->setFont(wasmFont);
+            setFont(wasmFont);
         }
-        if (cameras.size() <= 1) {
-            ui->cameraComboBox->setVisible(false);
-        } else if (ui->cameraWidget) {
-            int idx = ui->cameraWidget->currentCameraIndex();
-            if (idx >= 0 && idx < cameras.size()) {
-                ui->cameraComboBox->setCurrentIndex(idx);
-            }
-            connect(ui->cameraComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                    this, [this](int index) {
-                if (ui->cameraWidget) {
-                    ui->cameraWidget->setCameraDevice(index);
-                }
-            });
+    } else {
+        qWarning() << "Failed to load bundled Chinese font in MainWindow";
+    }
+
+    const QString wasmFontCss = QStringLiteral("font-family: '%1', sans-serif;").arg(wasmFontFamily);
+    setStyleSheet(styleSheet() + QStringLiteral("\n"
+        "QWidget, QLabel, QComboBox, QComboBox QAbstractItemView, QToolTip { %1 }\n"
+        "QToolTip { color: #FFFFFF; background-color: #2C2C2C; border: 1px solid rgba(255,255,255,0.35); padding: 6px; }\n")
+        .arg(wasmFontCss));
+
+    for (QWidget *widget : findChildren<QWidget *>()) {
+        QFont widgetFont(wasmFontFamily);
+        widgetFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
+        widget->setFont(widgetFont);
+    }
+
+    if (ui->micButton) {
+        ui->micButton->setText(QStringLiteral("Mic"));
+        ui->micButton->setToolTip(QStringLiteral("麦克风 - 开启/关闭语音输入"));
+    }
+    if (ui->sendButton) {
+        ui->sendButton->setText(QStringLiteral("Cam"));
+        ui->sendButton->setToolTip(QStringLiteral("打开摄像头"));
+    }
+    if (ui->videoButton) {
+        ui->videoButton->setText(QStringLiteral("Shot"));
+        ui->videoButton->setToolTip(QStringLiteral("截取当前画面作为背景"));
+    }
+    if (ui->endCallButton) {
+        ui->endCallButton->setText(QStringLiteral("Zoom"));
+        ui->endCallButton->setToolTip(QStringLiteral("循环全屏放大已标记的人脸"));
+    }
+
+    wasm_face_detection_timer_ = new QTimer(this);
+    wasm_face_detection_timer_->setInterval(1000);
+    connect(wasm_face_detection_timer_, &QTimer::timeout, this, [this]() {
+        if (wasm_realtime_face_detection_enabled_ && wasm_face_marking_enabled_) {
+            runWasmRetinaFaceDetection(true);
         }
+    });
+#endif
+
+    // 枚举摄像头设备并填充顶部下拉框。WASM 授权前通常只能拿到空列表，点击按钮授权后会再次刷新。
+    refreshCameraDevices();
+    auto *mediaDevices = new QMediaDevices(this);
+    connect(mediaDevices, &QMediaDevices::videoInputsChanged,
+            this, &MainWindow::refreshCameraDevices);
+
+    // 摄像头选择事件
+    if (ui->cameraRadioButton1 && ui->cameraWidget) {
+        connect(ui->cameraRadioButton1, &QRadioButton::clicked, [this]() {
+            ui->cameraWidget->setCameraDevice(0);
+        });
+    }
+    if (ui->cameraRadioButton2 && ui->cameraWidget) {
+        connect(ui->cameraRadioButton2, &QRadioButton::clicked, [this]() {
+            ui->cameraWidget->setCameraDevice(1);
+        });
     }
 
     // 状态栏时间刷新
@@ -190,6 +572,242 @@ MainWindow::~MainWindow()
     }
     delete ui;
 }
+
+void MainWindow::refreshCameraDevices()
+{
+    if (!ui->cameraGroupBox) {
+        return;
+    }
+
+    const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
+
+    qDebug() << "=== refreshCameraDevices called ===";
+    qDebug() << "QMediaDevices::videoInputs() count:" << cameras.size();
+
+    for (int i = 0; i < cameras.size(); ++i) {
+        const QCameraDevice &device = cameras[i];
+        qDebug() << "\nCamera" << i << ":";
+        qDebug() << "  Description:" << device.description();
+        qDebug() << "  ID:" << device.id();
+        qDebug() << "  Position:" << (device.position() == QCameraDevice::FrontFace ? "Front" :
+                                      device.position() == QCameraDevice::BackFace ? "Back" : "Other");
+    }
+
+    // 直接显示到 UI 上进行调试
+    QString debugText = QString("Found %1 cameras via QMediaDevices::videoInputs()").arg(cameras.size());
+    qDebug() << debugText;
+
+#ifdef Q_OS_WASM
+    char *devicesJsonPtr = wasmEnumerateVideoDevices();
+    const QString devicesJson = devicesJsonPtr ? QString::fromUtf8(devicesJsonPtr) : QString();
+    if (devicesJsonPtr) {
+        std::free(devicesJsonPtr);
+    }
+
+    qDebug() << "WASM devices JSON:" << devicesJson;
+
+    const QJsonDocument devicesDoc = QJsonDocument::fromJson(devicesJson.toUtf8());
+
+    qDebug() << "=== Full JSON response ===";
+    qDebug() << devicesJson;
+
+    int addedCount = 0;
+
+    // 更新 Radio button 控件组
+    QMap<int, QString> cameraLabels;
+
+    if (devicesDoc.isObject() && devicesDoc.object().value(QStringLiteral("ok")).toBool(false)) {
+        const QJsonArray devices = devicesDoc.object().value(QStringLiteral("devices")).toArray();
+        qDebug() << "=== Browser API devices ===";
+        qDebug() << "Count:" << devices.size();
+
+        for (int i = 0; i < devices.size(); ++i) {
+            const QJsonObject device = devices[i].toObject();
+            qDebug() << "Device" << i << ":" << device;
+
+            QString label = device.value(QStringLiteral("label")).toString().trimmed();
+            if (label.isEmpty()) {
+                label = QStringLiteral("摄像头 %1").arg(i + 1);
+            }
+
+            cameraLabels[i] = label;
+            addedCount++;
+        }
+    }
+
+    // 同时显示 Qt API 找到的摄像头，防止遗漏
+    if (cameras.size() > 0) {
+        qDebug() << "=== Qt API devices ===";
+        qDebug() << "Count:" << cameras.size();
+
+        for (int i = 0; i < cameras.size(); ++i) {
+            const QCameraDevice &device = cameras[i];
+            qDebug() << "Device" << i << ":" << device.description() <<
+                        "Position:" << (device.position() == QCameraDevice::FrontFace ? "Front" :
+                                        device.position() == QCameraDevice::BackFace ? "Back" : "Other");
+
+            QString label = device.description().trimmed();
+            if (label.isEmpty()) {
+                label = QStringLiteral("摄像头 %1").arg(addedCount + i + 1);
+            }
+            if (device.position() == QCameraDevice::FrontFace)
+                label += QStringLiteral(" [前置]");
+            else if (device.position() == QCameraDevice::BackFace)
+                label += QStringLiteral(" [后置]");
+
+            cameraLabels[addedCount + i] = label;
+        }
+    }
+
+    qDebug() << "=== Total devices added ===";
+    qDebug() << "Added count:" << cameraLabels.size();
+
+    // 更新 Radio button 文字
+    if (ui->cameraRadioButton1) {
+        if (cameraLabels.contains(0)) {
+            ui->cameraRadioButton1->setText(cameraLabels[0]);
+            ui->cameraRadioButton1->setVisible(true);
+        } else {
+            ui->cameraRadioButton1->setVisible(false);
+        }
+    }
+
+    if (ui->cameraRadioButton2) {
+        if (cameraLabels.contains(1)) {
+            ui->cameraRadioButton2->setText(cameraLabels[1]);
+            ui->cameraRadioButton2->setVisible(true);
+        } else {
+            ui->cameraRadioButton2->setVisible(false);
+        }
+    }
+#else
+    // 非 WASM 版本，确保显示所有摄像头
+    qDebug() << "Displaying" << cameras.size() << "cameras in non-WASM version";
+    for (int i = 0; i < cameras.size(); ++i) {
+        const QCameraDevice &device = cameras[i];
+        QString label = device.description().trimmed();
+        if (label.isEmpty()) {
+            label = QStringLiteral("摄像头 %1").arg(i + 1);
+        }
+        if (device.position() == QCameraDevice::FrontFace)
+            label += QStringLiteral(" [前置]");
+        else if (device.position() == QCameraDevice::BackFace)
+            label += QStringLiteral(" [后置]");
+        auto *item = new QListWidgetItem(label);
+        item->setTextAlignment(Qt::AlignHCenter);
+        ui->cameraListWidget->addItem(item);
+    }
+#endif
+
+    // 更新当前选中的 radio button
+    int currentIndex = 0;
+    if (ui->cameraWidget) {
+        currentIndex = ui->cameraWidget->currentCameraIndex();
+    }
+
+    if (currentIndex == 0) {
+        ui->cameraRadioButton1->setChecked(true);
+    } else if (currentIndex == 1) {
+        ui->cameraRadioButton2->setChecked(true);
+    }
+}
+
+#ifdef Q_OS_WASM
+void MainWindow::runWasmRetinaFaceDetection(bool continuousMode)
+{
+    if (wasm_face_detection_busy_) {
+        if (!continuousMode) {
+            QTimer::singleShot(300, this, [this]() {
+                runWasmRetinaFaceDetection(false);
+            });
+        }
+        return;
+    }
+    if (!ui->cameraWidget || !wasm_face_marking_enabled_) {
+        return;
+    }
+
+    const QImage frame = ui->cameraWidget->currentDisplayFrame();
+    if (frame.isNull()) {
+        if (!continuousMode) {
+            ui->voiceHintLabel->setText(QStringLiteral("请先点击 Cam 打开摄像头，或点击 Shot 固定画面"));
+            ui->voiceHintLabel->show();
+        }
+        return;
+    }
+
+    QByteArray pngBytes;
+    QBuffer buffer(&pngBytes);
+    buffer.open(QIODevice::WriteOnly);
+    frame.convertToFormat(QImage::Format_RGBA8888).save(&buffer, "PNG");
+    const QString dataUrl = QStringLiteral("data:image/png;base64,%1")
+        .arg(QString::fromLatin1(pngBytes.toBase64()));
+    const QByteArray dataUrlUtf8 = dataUrl.toUtf8();
+
+    wasm_face_detection_busy_ = true;
+    if (!continuousMode) {
+        ui->endCallButton->setEnabled(false);
+        ui->voiceHintLabel->setText(QStringLiteral("正在加载 RetinaFace 并检测人脸..."));
+        ui->voiceHintLabel->show();
+    }
+
+    char *jsonPtr = wasmRunRetinaFaceOnPng(dataUrlUtf8.constData());
+    const QString json = jsonPtr ? QString::fromUtf8(jsonPtr) : QString();
+    if (jsonPtr) {
+        std::free(jsonPtr);
+    }
+
+    QVector<QRectF> boxes;
+    QString errorMessage;
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isObject()) {
+        errorMessage = QStringLiteral("RetinaFace 返回结果无效");
+    } else {
+        const QJsonObject root = doc.object();
+        if (!root.value(QStringLiteral("ok")).toBool(false)) {
+            errorMessage = root.value(QStringLiteral("error")).toString(QStringLiteral("RetinaFace 检测失败"));
+        } else {
+            const QJsonArray array = root.value(QStringLiteral("boxes")).toArray();
+            for (const QJsonValue &value : array) {
+                const QJsonObject box = value.toObject();
+                boxes.append(QRectF(box.value(QStringLiteral("x")).toDouble(),
+                                    box.value(QStringLiteral("y")).toDouble(),
+                                    box.value(QStringLiteral("w")).toDouble(),
+                                    box.value(QStringLiteral("h")).toDouble()));
+            }
+        }
+    }
+
+    if ((continuousMode && !wasm_realtime_face_detection_enabled_) || !wasm_face_marking_enabled_) {
+        wasm_face_detection_busy_ = false;
+        return;
+    }
+
+    if (errorMessage.isEmpty()) {
+        ui->cameraWidget->setFaceBoxes(boxes);
+        if (!continuousMode) {
+            ui->voiceHintLabel->setText(boxes.isEmpty()
+                ? QStringLiteral("未检测到人脸")
+                : QStringLiteral("已标记 %1 张人脸").arg(boxes.size()));
+            ui->voiceHintLabel->show();
+        } else if (ui->cameraWidget->isCameraActive()) {
+            ui->voiceHintLabel->hide();
+        }
+    } else {
+        if (!continuousMode) {
+            ui->cameraWidget->clearFaceBoxes();
+            ui->voiceHintLabel->setText(QStringLiteral("检测失败: %1").arg(errorMessage));
+            ui->voiceHintLabel->show();
+        } else {
+            qWarning() << "Realtime RetinaFace detection failed:" << errorMessage;
+        }
+    }
+    if (!continuousMode) {
+        ui->endCallButton->setEnabled(true);
+    }
+    wasm_face_detection_busy_ = false;
+}
+#endif
 
 // ============================================================
 // 槽函数 - 与 docs/gui.html 底部四个按钮一一对应
@@ -260,19 +878,45 @@ void MainWindow::onSendClicked()
             QStringLiteral("加载模型或初始化失败:\n%1").arg(QString::fromLocal8Bit(e.what())));
     }
 #else
-    auto *messageBox = new QMessageBox(
-        QMessageBox::Information,
-        QStringLiteral("Web 版本提示"),
-        QStringLiteral("人脸管理暂不支持 WebAssembly 版本。"),
-        QMessageBox::Ok,
-        this);
-    messageBox->setAttribute(Qt::WA_DeleteOnClose);
-    messageBox->open();
+    if (!ui->cameraWidget) {
+        return;
+    }
 
-    ui->voiceHintLabel->setText(QStringLiteral("人脸管理不支持 Web 版本"));
-    QTimer::singleShot(2000, this, [this]() {
-        ui->voiceHintLabel->setText(is_mic_active_ ? QStringLiteral("正在倾听...")
-                                                   : QStringLiteral("你可以开始说话"));
+    // WebAssembly 下必须由用户点击触发摄像头授权；授权成功后 Qt 会开始向 CameraWidget 推送实时帧。
+    keep_camera_combo_visible_ = true;
+    wasm_face_marking_enabled_ = false;
+    wasm_realtime_face_detection_enabled_ = false;
+    wasm_face_detection_busy_ = false;
+    if (wasm_face_detection_timer_) {
+        wasm_face_detection_timer_->stop();
+    }
+    ui->cameraWidget->clearFaceBoxes();
+    ui->cameraWidget->startCamera();
+    ui->cameraWidget->clearFaceBoxes();
+    ui->pulseDots->hide();
+    ui->voiceHintLabel->setText(QStringLiteral("正在打开摄像头..."));
+    ui->transcriptionLabel->hide();
+
+    // 浏览器授权与设备标签更新是异步的，启动后刷新一次，并在下一轮事件循环再次刷新。
+    refreshCameraDevices();
+    QTimer::singleShot(1000, this, [this]() {
+        refreshCameraDevices();
+        if (ui->cameraWidget && ui->cameraWidget->isCameraActive()) {
+            ui->cameraWidget->clearFaceBoxes();
+            ui->voiceHintLabel->hide();
+        } else {
+            ui->voiceHintLabel->setText(QStringLiteral("请允许浏览器访问摄像头"));
+            ui->voiceHintLabel->show();
+        }
+    });
+    QTimer::singleShot(2500, this, [this]() {
+        refreshCameraDevices();
+        if (ui->cameraWidget && !ui->cameraWidget->hasFrame()) {
+            ui->cameraWidget->restartCamera();
+        }
+    });
+    QTimer::singleShot(4000, this, [this]() {
+        refreshCameraDevices();
     });
 #endif
 }
@@ -315,11 +959,52 @@ void MainWindow::onVideoToggled(bool checked)
     }
 #else
     Q_UNUSED(checked)
+    if (!ui->cameraWidget) {
+        return;
+    }
+
+    if (!ui->cameraWidget->isCameraActive()) {
+        ui->cameraWidget->startCamera();
+        ui->voiceHintLabel->setText(QStringLiteral("正在打开摄像头..."));
+        ui->voiceHintLabel->show();
+    }
+
+    if (ui->cameraWidget->captureCurrentFrameAsBackground()) {
+        wasm_realtime_face_detection_enabled_ = false;
+        wasm_face_marking_enabled_ = true;
+        if (wasm_face_detection_timer_) {
+            wasm_face_detection_timer_->stop();
+        }
+        ui->voiceHintLabel->setText(QStringLiteral("已截取当前画面，正在标记人脸..."));
+        ui->voiceHintLabel->show();
+        runWasmRetinaFaceDetection(false);
+    } else {
+        ui->voiceHintLabel->setText(QStringLiteral("摄像头画面准备中，请稍后再点一次"));
+        ui->voiceHintLabel->show();
+    }
+
+    ui->videoButton->blockSignals(true);
+    ui->videoButton->setChecked(false);
+    ui->videoButton->blockSignals(false);
 #endif
 }
 
 void MainWindow::onEndCallClicked()
 {
+#ifdef Q_OS_WASM
+    wasm_realtime_face_detection_enabled_ = false;
+    if (wasm_face_detection_timer_) {
+        wasm_face_detection_timer_->stop();
+    }
+
+    if (ui->cameraWidget && ui->cameraWidget->showNextMarkedFaceFullscreen()) {
+        ui->voiceHintLabel->hide();
+    } else {
+        ui->voiceHintLabel->setText(QStringLiteral("请先点击 Cam 或 Shot 标记人脸"));
+        ui->voiceHintLabel->show();
+    }
+    return;
+#else
     // 按钮 4: 红色 X - 结束通话, 停止全部任务并关闭窗口
     is_call_active_ = false;
 
@@ -344,6 +1029,7 @@ void MainWindow::onEndCallClicked()
 
     ui->voiceHintLabel->setText(QStringLiteral("通话已结束"));
     QTimer::singleShot(400, this, &QWidget::close);
+#endif
 }
 
 void MainWindow::updateStatusBarTime()
