@@ -124,6 +124,18 @@ if errorlevel 1 (echo [ERROR] WASM CMake configure failed& pause& goto menu)
 if errorlevel 1 (echo [ERROR] WASM build failed& pause& goto menu)
 call :copy_wasm_runtime "!BIN!"
 call :copy_runtime_data "!BIN!"
+rem 替换默认生成的 HTML 文件为我们优化后的版本
+if exist "!SRC!\docs\index.html" (
+    copy /y "!SRC!\docs\index.html" "!BIN!\BntechEyeFriend.html" >nul
+    echo [OK] Replaced BntechEyeFriend.html with optimized version.
+) else (
+    echo [WARN] docs\index.html not found - using default HTML file.
+)
+rem 同时复制优化后的 qtloader.js 到 build 目录
+if exist "!SRC!\docs\qtloader.js" (
+    copy /y "!SRC!\docs\qtloader.js" "!BIN!\qtloader.js" >nul
+    echo [OK] Replaced qtloader.js with optimized version.
+)
 echo [OK] WASM build output: !BIN!
 echo [NOTE] Start a local web server in the output directory to run BntechEyeFriend.html.
 goto menu
