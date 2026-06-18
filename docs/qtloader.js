@@ -210,7 +210,12 @@ async function qtLoad(config)
         config.preRun = [];
     config.preRun.push(qtPreRun);
 
-    config.onRuntimeInitialized = () => config.qt.onLoaded?.();
+    // 保留用户设置的 onRuntimeInitialized 回调
+    const originalOnRuntimeInitialized = config.onRuntimeInitialized;
+    config.onRuntimeInitialized = () => {
+        originalOnRuntimeInitialized?.();
+        config.qt.onLoaded?.();
+    };
 
     const originalLocateFile = config.locateFile;
     config.locateFile = filename =>
