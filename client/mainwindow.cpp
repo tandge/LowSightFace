@@ -183,7 +183,33 @@ EM_ASYNC_JS(char *, wasmEnumerateVideoDevices, (), {
 EM_ASYNC_JS(char *, wasmRunRetinaFaceOnPng, (const char *pngDataUrlPtr), {
     const pngDataUrl = UTF8ToString(pngDataUrlPtr);
     const modelUrl = 'models/retinaface.onnx';
-    const absoluteModelUrl = 'https://bynbj.com/tools/eye_friend/models/retinaface.onnx';
+
+    // 动态获取当前页面 URL 信息
+    const currentOrigin = window.location.origin;
+    const currentPath = window.location.pathname;
+
+    // 构建模型下载的绝对 URL
+    // 解析当前路径，找到正确的 basePath
+    const scriptElements = document.getElementsByTagName('script');
+    let appBasePath = '';
+
+    // 找到加载当前应用的脚本标签（BntechEyeFriend.js）
+    for (let i = 0; i < scriptElements.length; i++) {
+        const src = scriptElements[i].src;
+        if (src && src.includes('BntechEyeFriend')) {
+            appBasePath = src.substring(0, src.lastIndexOf('/') + 1);
+            break;
+        }
+    }
+
+    // 如果找不到脚本标签，则使用当前路径作为 basePath
+    if (!appBasePath) {
+        appBasePath = currentOrigin + currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+    }
+
+    // 构建模型的绝对下载路径
+    const absoluteModelUrl = appBasePath + 'models/retinaface.onnx';
+
     const modelPath = '/models/retinaface.onnx';
     const ortScriptUrl = 'onnxruntime/ort.min.js';
     const inputSize = 640;
