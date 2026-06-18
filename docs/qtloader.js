@@ -101,11 +101,22 @@ async function qtLoad(config)
     config.qtFontDpi = config.qt.fontDpi;
     delete config.qt.fontDpi;
 
+    // 加载超时设置
+    const loadTimeout = config.loadTimeout ?? 300000; // 5分钟超时
+    let timeoutId;
+
     // Used for rejecting a failed load's promise where emscripten itself does not allow it,
     // like in instantiateWasm below. This allows us to throw in case of a load error instead of
     // hanging on a promise to entry function, which emscripten unfortunately does.
     let circuitBreakerReject;
     const circuitBreaker = new Promise((_, reject) => { circuitBreakerReject = reject; });
+
+    // 超时处理
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error(`加载超时，请检查网络连接后重试。超时时间: ${loadTimeout / 1000}秒`));
+        }, loadTimeout);
+    });
 
     // If module async getter is present, use it so that module reuse is possible.
     if (config.qt.module) {
@@ -119,6 +130,49 @@ async function qtLoad(config)
                 circuitBreakerReject(e);
             }
         }
+    }
+
+    // 下载进度监听
+    const originalFetch = fetch;
+    if (config.onDownloadProgress) {
+        fetch = async (url, options) => {
+            const response = await originalFetch(url, options);
+
+            // 创建可读流来跟踪下载进度
+            const reader = response.body.getReader();
+            const contentLength = response.headers.get('content-length');
+            const total = contentLength ? parseInt(contentLength) : 0;
+            let loaded = 0;
+
+            const stream = new ReadableStream({
+                start(controller) {
+                    const push = async () => {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+                            loaded += value.length;
+                            config.onDownloadProgress({
+                                loaded: loaded,
+                                total: total,
+                                percent: total > 0 ? (loaded / total) * 100 : 0,
+                                url: url
+                            });
+                            controller.enqueue(value);
+                            push();
+                        });
+                    };
+                    push();
+                }
+            });
+
+            return new Response(stream, {
+                headers: response.headers,
+                status: response.status,
+                statusText: response.statusText
+            });
+        };
     }
 
     const qtPreRun = (instance) => {
@@ -202,15 +256,26 @@ async function qtLoad(config)
         self.preloadData = (await Promise.all(fileList.map(loadFiles))).flat();
     }
 
-    await fetchPreloadFiles();
+    try {
+        await fetchPreloadFiles();
+    } catch (e) {
+        clearTimeout(timeoutId);
+        config.qt.onExit?.({
+            text: `预加载资源失败: ${e.message}`,
+            crashed: true
+        });
+        throw e;
+    }
 
     // Call app/emscripten module entry function. It may either come from the emscripten
     // runtime script or be customized as needed.
     let instance;
     try {
         instance = await Promise.race(
-            [circuitBreaker, config.qt.entryFunction(config)]);
+            [circuitBreaker, timeoutPromise, config.qt.entryFunction(config)]);
+        clearTimeout(timeoutId);
     } catch (e) {
+        clearTimeout(timeoutId);
         config.qt.onExit?.({
             text: e.message,
             crashed: true

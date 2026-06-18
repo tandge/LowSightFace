@@ -1,73 +1,394 @@
 <!doctype html>
-<html lang="en-us">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, user-scalable=0, initial-scale=1.0, maximum-scale=1.0"/>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
 
-    <!--Set visual viewport size for mobile devices to the device size,
-        witch results in a scale of 1 and a 1:1 mapping between CSS pixels
-        and Qt device independent pixels. -->
-    <meta name="viewport" content="width=device-width, height=device-height, user-scalable=0"/>
+    <title>BntechEyeFriend - 视力健康助手</title>
 
-    <title>BntechEyeFriend</title>
     <style>
-      /* Make the html body cover the entire (visual) viewport with no scroll bars. */
-      html, body { padding: 0; margin: 0; overflow: hidden; height: 100% }
-      #screen { width: 100%; height: 100%; }
+      html, body {
+        padding: 0;
+        margin: 0;
+        overflow: hidden;
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+
+      #screen {
+        width: 100%;
+        height: 100%;
+        display: none;
+      }
+
+      #qtspinner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+      }
+
+      #qtspinner center {
+        width: 100%;
+        max-width: 400px;
+        padding: 20px;
+      }
+
+      #qtspinner img {
+        display: block;
+        margin: 0 auto 20px;
+        max-width: 80%;
+        height: auto;
+        animation: pulse 2s infinite;
+      }
+
+      #qtspinner strong {
+        display: block;
+        font-size: 1.2rem;
+        margin-bottom: 15px;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      }
+
+      #qtstatus {
+        font-size: 1rem;
+        margin: 10px 0;
+        min-height: 24px;
+        color: #fff;
+      }
+
+      .progress-container {
+        width: 100%;
+        max-width: 300px;
+        height: 4px;
+        background: rgba(255,255,255,0.3);
+        border-radius: 2px;
+        margin: 20px auto;
+        overflow: hidden;
+      }
+
+      .progress-bar {
+        width: 0%;
+        height: 100%;
+        background: #4CAF50;
+        transition: width 0.3s ease;
+        border-radius: 2px;
+        animation: progressPulse 1.5s ease-in-out infinite;
+      }
+
+      .loading-dots {
+        display: inline-block;
+        margin-left: 5px;
+      }
+
+      .loading-dots span {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: white;
+        margin: 0 2px;
+        animation: bounce 1.4s ease-in-out infinite both;
+      }
+
+      .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+      .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.05); opacity: 1; }
+      }
+
+      @keyframes bounce {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+      }
+
+      @keyframes progressPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+
+      .error-message {
+        background: rgba(255,0,0,0.1);
+        border: 1px solid rgba(255,0,0,0.3);
+        color: #ff4444;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        text-align: left;
+        max-width: 100%;
+        word-wrap: break-word;
+      }
+
+      .retry-button {
+        background: #4CAF50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin: 15px 0;
+        border-radius: 5px;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+
+      .retry-button:hover {
+        background: #45a049;
+      }
+
+      .network-info {
+        font-size: 0.8rem;
+        color: rgba(255,255,255,0.8);
+        margin-top: 10px;
+      }
     </style>
   </head>
-  <body onload="init()">
+
+  <body>
     <figure style="overflow:visible;" id="qtspinner">
-      <center style="margin-top:1.5em; line-height:150%">
-        <img src="qtlogo.svg" width="320" height="200" style="display:block"></img>
-        <strong>Qt for WebAssembly: BntechEyeFriend</strong>
-        <div id="qtstatus"></div>
-        <noscript>JavaScript is disabled. Please enable JavaScript to use this application.</noscript>
+      <center>
+        <img src="qtlogo.svg" width="240" height="150" alt="Qt Logo"></img>
+        <strong>BntechEyeFriend - 视力健康助手</strong>
+        <div id="qtstatus">正在加载应用程序...</div>
+        <div class="progress-container">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="loading-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="network-info" id="networkInfo">检测网络连接...</div>
+        <noscript>
+          <div class="error-message">
+            <strong>需要启用 JavaScript</strong><br>
+            请在浏览器中启用 JavaScript 以使用此应用程序。
+          </div>
+        </noscript>
+        <div id="errorContainer"></div>
       </center>
     </figure>
     <div id="screen"></div>
 
     <script type="text/javascript">
+        // 网络检测
+        function checkNetwork() {
+            const networkInfo = document.querySelector('#networkInfo');
+
+            if (navigator.connection) {
+                const connection = navigator.connection;
+                const effectiveType = connection.effectiveType;
+                const downlink = connection.downlink;
+
+                let networkClass = 'unknown';
+                if (effectiveType === '4g') {
+                    networkClass = 'good';
+                    networkInfo.textContent = `网络良好: ${effectiveType} (${downlink} Mbps)`;
+                } else if (effectiveType === '3g') {
+                    networkClass = 'fair';
+                    networkInfo.textContent = `网络正常: ${effectiveType} (${downlink} Mbps)`;
+                } else if (effectiveType === '2g') {
+                    networkClass = 'poor';
+                    networkInfo.textContent = `网络较慢: ${effectiveType} (${downlink} Mbps) - 加载时间可能较长`;
+                } else if (effectiveType === 'slow-2g') {
+                    networkClass = 'very-poor';
+                    networkInfo.textContent = `网络较差: ${effectiveType} (${downlink} Mbps) - 加载可能需要较长时间`;
+                }
+
+                networkInfo.className = 'network-info ' + networkClass;
+            }
+        }
+
+        // 动态更新加载进度
+        let progress = 0;
+        let progressInterval = null;
+
+        function startProgressAnimation() {
+            const progressBar = document.querySelector('#progressBar');
+            const status = document.querySelector('#qtstatus');
+
+            const stages = [
+                { text: '正在加载应用程序核心...', duration: 2000 },
+                { text: '初始化 WebAssembly 环境...', duration: 3000 },
+                { text: '加载计算机视觉库...', duration: 4000 },
+                { text: '加载 AI 识别模型...', duration: 5000 },
+                { text: '应用程序启动中...', duration: 2000 }
+            ];
+
+            let stageIndex = 0;
+
+            progressInterval = setInterval(() => {
+                if (stageIndex < stages.length) {
+                    const stage = stages[stageIndex];
+                    status.innerHTML = stage.text;
+
+                    const targetProgress = (stageIndex + 1) * 20;
+                    const step = (targetProgress - progress) / (stage.duration / 100);
+
+                    if (progress < targetProgress) {
+                        progress += step;
+                        progressBar.style.width = Math.min(progress, targetProgress) + '%';
+                    } else {
+                        stageIndex++;
+                    }
+                } else {
+                    // 加载接近完成时，显示最终进度
+                    if (progress < 90) {
+                        progress += 2;
+                        progressBar.style.width = progress + '%';
+                    }
+                }
+            }, 100);
+        }
+
+        function updateProgress(text, percent) {
+            const progressBar = document.querySelector('#progressBar');
+            const status = document.querySelector('#qtstatus');
+
+            if (text) {
+                status.innerHTML = text;
+            }
+
+            if (percent !== undefined) {
+                progress = percent;
+                progressBar.style.width = percent + '%';
+            }
+        }
+
+        // 显示错误信息
+        function showError(message, details) {
+            const errorContainer = document.querySelector('#errorContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+
+            const errorHTML = `<strong>加载失败</strong><br>${message}`;
+            if (details) {
+                errorHTML += `<br><small>${details}</small>`;
+            }
+
+            errorDiv.innerHTML = errorHTML;
+
+            const retryButton = document.createElement('button');
+            retryButton.className = 'retry-button';
+            retryButton.textContent = '重试';
+            retryButton.addEventListener('click', () => location.reload());
+
+            errorDiv.appendChild(retryButton);
+            errorContainer.innerHTML = '';
+            errorContainer.appendChild(errorDiv);
+        }
+
         async function init()
         {
             const spinner = document.querySelector('#qtspinner');
             const screen = document.querySelector('#screen');
             const status = document.querySelector('#qtstatus');
+            const errorContainer = document.querySelector('#errorContainer');
+
+            checkNetwork();
+            startProgressAnimation();
 
             const showUi = (ui) => {
                 [spinner, screen].forEach(element => element.style.display = 'none');
-                if (screen === ui)
+                if (screen === ui) {
+                    screen.style.display = 'block';
                     screen.style.position = 'default';
-                ui.style.display = 'block';
+                } else {
+                    ui.style.display = 'flex';
+                }
             }
 
             try {
-                showUi(spinner);
-                status.innerHTML = 'Loading...';
-
                 const instance = await qtLoad({
                     qt: {
-                        onLoaded: () => showUi(screen),
+                        onLoaded: () => {
+                            updateProgress('应用程序加载完成！', 100);
+                            setTimeout(() => showUi(screen), 500);
+                        },
                         onExit: exitData =>
                         {
-                            status.innerHTML = 'Application exit';
-                            status.innerHTML +=
-                                exitData.code !== undefined ? ` with code ${exitData.code}` : '';
-                            status.innerHTML +=
-                                exitData.text !== undefined ? ` (${exitData.text})` : '';
+                            status.innerHTML = '应用程序已退出';
+                            if (exitData.code !== undefined)
+                                status.innerHTML += ` (代码: ${exitData.code})`;
+                            if (exitData.text !== undefined)
+                                status.innerHTML += ` (${exitData.text})`;
+                            if (exitData.crashed) {
+                                status.innerHTML = `应用程序崩溃: ${exitData.text}`;
+                                showError('应用程序崩溃', exitData.text);
+                            }
                             showUi(spinner);
                         },
                         entryFunction: window.createQtAppInstance,
                         containerElements: [screen],
-                        
+
+                    },
+                    onDownloadProgress: (progress) => {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        updateProgress(`正在下载资源: ${percent}%`, percent);
+                    },
+                    onRuntimeInitialized: () => {
+                        updateProgress('运行时初始化完成', 95);
                     }
                 });
             } catch (e) {
-                console.error(e);
+                console.error('初始化错误:', e);
                 console.error(e.stack);
+
+                clearInterval(progressInterval);
+
+                let errorMessage = '应用程序加载失败';
+                let errorDetails = '';
+
+                if (e.message.includes('fetch') || e.message.includes('network')) {
+                    errorMessage = '网络连接失败';
+                    errorDetails = '无法连接到服务器，请检查网络连接后重试。';
+                } else if (e.message.includes('WebAssembly')) {
+                    errorMessage = '浏览器不支持';
+                    errorDetails = '您的浏览器不支持 WebAssembly 技术，请升级到最新版本的浏览器。';
+                } else if (e.message.includes('time') || e.message.includes('timeout')) {
+                    errorMessage = '加载超时';
+                    errorDetails = '资源加载超时，请检查网络连接或重试。';
+                } else {
+                    errorDetails = e.message;
+                }
+
+                showError(errorMessage, errorDetails);
+                status.innerHTML = '加载失败';
+                document.querySelector('#progressBar').style.width = '100%';
+                document.querySelector('#progressBar').style.background = '#ff4444';
             }
         }
+
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            // 检查网络连接
+            window.addEventListener('online', checkNetwork);
+            window.addEventListener('offline', () => {
+                const networkInfo = document.querySelector('#networkInfo');
+                networkInfo.textContent = '网络连接已断开';
+                networkInfo.className = 'network-info poor';
+            });
+
+            // 启动初始化
+            setTimeout(init, 100);
+        });
     </script>
+
     <script src="BntechEyeFriend.js"></script>
     <script type="text/javascript" src="qtloader.js"></script>
   </body>
