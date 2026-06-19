@@ -136,6 +136,37 @@ if exist "!SRC!\docs\qtloader.js" (
     copy /y "!SRC!\docs\qtloader.js" "!BIN!\qtloader.js" >nul
     echo [OK] Replaced qtloader.js with optimized version.
 )
+
+rem 使用 Binaryen 的 wasm-opt 工具优化 WASM 文件
+set WASM_FILE="!BIN!\BntechEyeFriend.wasm"
+if exist %WASM_FILE% (
+    echo [INFO] Optimizing WASM file...
+    if exist "!WASM_FILE!.backup" (
+        del "!WASM_FILE!.backup"
+    )
+    copy /y %WASM_FILE% "!WASM_FILE!.backup" >nul
+    wasm-opt %WASM_FILE% -O4 -o %WASM_FILE%
+    if errorlevel 0 (
+        echo [OK] WASM optimization complete.
+        rem 获取文件大小信息
+        for %%I in (%WASM_FILE%) do set "WASM_SIZE=%%~zI"
+        for %%I in ("!WASM_FILE!.backup") do set "WASM_SIZE_BEFORE=%%~zI"
+        set /a "WASM_SIZE_KB=!WASM_SIZE!/1024"
+        set /a "WASM_SIZE_BEFORE_KB=!WASM_SIZE_BEFORE!/1024"
+        set /a "WASM_SAVING=(!WASM_SIZE_BEFORE! - !WASM_SIZE!)*100/!WASM_SIZE_BEFORE!"
+        echo [INFO] Original size: !WASM_SIZE_BEFORE_KB! KB
+        echo [INFO] Optimized size: !WASM_SIZE_KB! KB
+        echo [INFO] Savings: !WASM_SAVING!%%
+        del "!WASM_FILE!.backup"
+    ) else (
+        echo [WARN] WASM optimization failed - using unoptimized version.
+        copy /y "!WASM_FILE!.backup" %WASM_FILE% >nul
+        del "!WASM_FILE!.backup"
+    )
+) else (
+    echo [WARN] BntechEyeFriend.wasm not found - skipping optimization.
+)
+
 echo [OK] WASM build output: !BIN!
 echo [NOTE] Start a local web server in the output directory to run BntechEyeFriend.html.
 goto menu
