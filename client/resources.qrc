@@ -1,4 +1,7 @@
 <RCC>
     <qresource prefix="/">
+        <qresource prefix="/fonts">
+            <file>fonts/NotoSansSC-VF.ttf</file>
+        </qresource>
     </qresource>
 </RCC>
