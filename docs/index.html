@@ -23,7 +23,10 @@
       #screen {
         width: 100%;
         height: 100%;
-        display: none;
+        display: block;
+        visibility: hidden;
+        opacity: 0;
+        transition: opacity 0.3s ease-in-out;
       }
 
       #qtspinner {
@@ -304,12 +307,18 @@
             startProgressAnimation();
 
             const showUi = (ui) => {
-                [spinner, screen].forEach(element => element.style.display = 'none');
-                if (screen === ui) {
-                    screen.style.display = 'block';
+                if (ui === screen) {
+                    spinner.style.visibility = 'hidden';
+                    spinner.style.opacity = '0';
+                    screen.style.visibility = 'visible';
+                    screen.style.opacity = '1';
                     screen.style.position = 'default';
                 } else {
-                    ui.style.display = 'flex';
+                    screen.style.visibility = 'hidden';
+                    screen.style.opacity = '0';
+                    spinner.style.visibility = 'visible';
+                    spinner.style.opacity = '1';
+                    spinner.style.display = 'flex';
                 }
             }
 
