@@ -513,20 +513,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->endCallButton, &QPushButton::clicked, this, &MainWindow::onEndCallClicked);
 
 #ifdef Q_OS_WASM
-    const int fontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/NotoSansSC-VF.ttf"));
-    QString wasmFontFamily = QStringLiteral("sans-serif");
-    if (fontId >= 0) {
-        const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-        if (!families.isEmpty()) {
-            wasmFontFamily = families.first();
-            QFont wasmFont(wasmFontFamily);
-            wasmFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
-            qApp->setFont(wasmFont);
-            setFont(wasmFont);
-        }
-    } else {
-        qWarning() << "Failed to load bundled Chinese font in MainWindow";
-    }
+    // 使用系统默认字体，避免尝试加载不存在的字体文件
+    // 这将防止在外部服务器部署时按钮文字无法显示的问题
+    qDebug() << "Using system default font for WebAssembly in MainWindow";
+    QString wasmFontFamily = QStringLiteral("Arial"); // 使用常见的系统字体
+    QFont wasmFont(wasmFontFamily);
+    wasmFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
+    qApp->setFont(wasmFont);
+    setFont(wasmFont);
 
     const QString wasmFontCss = QStringLiteral("font-family: '%1', sans-serif;").arg(wasmFontFamily);
     setStyleSheet(styleSheet() + QStringLiteral("\n"

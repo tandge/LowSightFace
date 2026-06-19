@@ -19,17 +19,12 @@ int main(int argc, char *argv[])
     app.setApplicationVersion("1.0.0");
 
 #ifdef Q_OS_WASM
-    const int fontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/NotoSansSC-VF.ttf"));
-    if (fontId >= 0) {
-        const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-        if (!families.isEmpty()) {
-            QFont font(families.first());
-            font.setStyleStrategy(QFont::PreferAntialias);
-            app.setFont(font);
-        }
-    } else {
-        qWarning() << "Failed to load bundled Chinese font";
-    }
+    // 使用系统默认字体，避免尝试加载不存在的字体文件
+    // 这将防止在外部服务器部署时按钮文字无法显示的问题
+    qDebug() << "Using system default font for WebAssembly";
+    QFont font("Arial"); // 使用常见的系统字体
+    font.setStyleStrategy(QFont::PreferAntialias);
+    app.setFont(font);
 #endif
 
     MainWindow window;
