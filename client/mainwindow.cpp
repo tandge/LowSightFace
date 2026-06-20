@@ -163,7 +163,7 @@ EM_ASYNC_JS(char *, wasmEnumerateVideoDevices, (), {
         }
 
         const cameras = cameraDevices.map((device, index) => ({
-            label: device.label && device.label.trim() !== '' ? device.label : `摄像头 ${index + 1}`,
+            label: device.label && device.label.trim() !== "" ? device.label : `摄像头 ${index + 1}`,
             deviceId: device.deviceId || `device_${index}`,
             groupId: device.groupId || `group_${index}`
         }));
@@ -191,7 +191,7 @@ EM_ASYNC_JS(char *, wasmRunRetinaFaceOnPng, (const char *pngDataUrlPtr), {
     // 构建模型下载的绝对 URL
     // 解析当前路径，找到正确的 basePath
     const scriptElements = document.getElementsByTagName('script');
-    let appBasePath = '';
+    let appBasePath = "";
 
     // 找到加载当前应用的脚本标签（BntechEyeFriend.js）
     for (let i = 0; i < scriptElements.length; i++) {
@@ -522,11 +522,8 @@ MainWindow::MainWindow(QWidget *parent)
     qApp->setFont(wasmFont);
     setFont(wasmFont);
 
-    const QString wasmFontCss = QStringLiteral("font-family: '%1', sans-serif;").arg(wasmFontFamily);
     setStyleSheet(styleSheet() + QStringLiteral("\n"
-        "QWidget, QLabel, QComboBox, QComboBox QAbstractItemView, QToolTip { %1 }\n"
-        "QToolTip { color: #FFFFFF; background-color: #2C2C2C; border: 1px solid rgba(255,255,255,0.35); padding: 6px; }\n")
-        .arg(wasmFontCss));
+        "QToolTip { color: #FFFFFF; background-color: #2C2C2C; border: 1px solid #777777; padding: 6px; }\n"));
 
     for (QWidget *widget : findChildren<QWidget *>()) {
         QFont widgetFont(wasmFontFamily);
@@ -534,21 +531,90 @@ MainWindow::MainWindow(QWidget *parent)
         widget->setFont(widgetFont);
     }
 
+    auto applyWasmRoundButtonStyle = [](QPushButton *button,
+                                        const QString &normalBg,
+                                        const QString &hoverBg,
+                                        const QString &checkedBg,
+                                        const QString &normalColor,
+                                        const QString &checkedColor,
+                                        int fontSize) {
+        if (!button) {
+            return;
+        }
+        button->setMinimumSize(81, 81);
+        button->setMaximumSize(81, 81);
+        button->setFlat(false);
+        button->setStyleSheet(QStringLiteral(
+            "QPushButton {"
+            "  min-width: 81px; max-width: 81px;"
+            "  min-height: 81px; max-height: 81px;"
+            "  border: none;"
+            "  border-radius: 40px;"
+            "  background-color: %1;"
+            "  color: %4;"
+            "  font-size: %6px;"
+            "  font-weight: 700;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: %2;"
+            "}"
+            "QPushButton:pressed {"
+            "  background-color: %2;"
+            "}"
+            "QPushButton:checked {"
+            "  background-color: %3;"
+            "  color: %5;"
+            "}"
+            "QPushButton:checked:hover {"
+            "  background-color: %3;"
+            "}")
+            .arg(normalBg, hoverBg, checkedBg, normalColor, checkedColor)
+            .arg(fontSize));
+    };
+
     if (ui->micButton) {
         ui->micButton->setText(QStringLiteral("Mic"));
         ui->micButton->setToolTip(QStringLiteral("麦克风 - 开启/关闭语音输入"));
+        applyWasmRoundButtonStyle(ui->micButton,
+                                  QStringLiteral("#F5F5F5"),
+                                  QStringLiteral("#FFFFFF"),
+                                  QStringLiteral("#4CAF50"),
+                                  QStringLiteral("#444444"),
+                                  QStringLiteral("#FFFFFF"),
+                                  18);
     }
     if (ui->sendButton) {
         ui->sendButton->setText(QStringLiteral("Cam"));
         ui->sendButton->setToolTip(QStringLiteral("打开摄像头"));
+        applyWasmRoundButtonStyle(ui->sendButton,
+                                  QStringLiteral("#EEEEEE"),
+                                  QStringLiteral("#FFFFFF"),
+                                  QStringLiteral("#EEEEEE"),
+                                  QStringLiteral("#444444"),
+                                  QStringLiteral("#444444"),
+                                  18);
     }
     if (ui->videoButton) {
         ui->videoButton->setText(QStringLiteral("Shot"));
         ui->videoButton->setToolTip(QStringLiteral("截取当前画面作为背景"));
+        applyWasmRoundButtonStyle(ui->videoButton,
+                                  QStringLiteral("#FFFFFF"),
+                                  QStringLiteral("#F5F5F5"),
+                                  QStringLiteral("#FF3B30"),
+                                  QStringLiteral("#222222"),
+                                  QStringLiteral("#FFFFFF"),
+                                  16);
     }
     if (ui->endCallButton) {
         ui->endCallButton->setText(QStringLiteral("Zoom"));
         ui->endCallButton->setToolTip(QStringLiteral("循环全屏放大已标记的人脸"));
+        applyWasmRoundButtonStyle(ui->endCallButton,
+                                  QStringLiteral("#F5F5F5"),
+                                  QStringLiteral("#FFFFFF"),
+                                  QStringLiteral("#F5F5F5"),
+                                  QStringLiteral("#FF3B30"),
+                                  QStringLiteral("#FF3B30"),
+                                  15);
     }
 
     wasm_face_detection_timer_ = new QTimer(this);
