@@ -572,6 +572,27 @@ MainWindow::MainWindow(QWidget *parent)
             .arg(fontSize));
     };
 
+    if (ui->overlay) {
+        ui->overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+        ui->overlay->raise();
+    }
+    if (ui->bottomArea) {
+        ui->bottomArea->setAttribute(Qt::WA_StyledBackground, true);
+        ui->bottomArea->setStyleSheet(QStringLiteral("QWidget#bottomArea { background: transparent; }"));
+        ui->bottomArea->raise();
+    }
+
+    auto prepareWasmButton = [](QPushButton *button) {
+        if (!button) {
+            return;
+        }
+        button->setAttribute(Qt::WA_StyledBackground, true);
+        button->setAutoFillBackground(false);
+        button->raise();
+        button->show();
+        button->update();
+    };
+
     if (ui->micButton) {
         ui->micButton->setText(QStringLiteral("Mic"));
         ui->micButton->setToolTip(QStringLiteral("Mic - Toggle voice input"));
@@ -582,6 +603,7 @@ MainWindow::MainWindow(QWidget *parent)
                                   QStringLiteral("#444444"),
                                   QStringLiteral("#FFFFFF"),
                                   18);
+        prepareWasmButton(ui->micButton);
     }
     if (ui->sendButton) {
         ui->sendButton->setText(QStringLiteral("Cam"));
@@ -593,6 +615,7 @@ MainWindow::MainWindow(QWidget *parent)
                                   QStringLiteral("#444444"),
                                   QStringLiteral("#444444"),
                                   18);
+        prepareWasmButton(ui->sendButton);
     }
     if (ui->videoButton) {
         ui->videoButton->setText(QStringLiteral("Shot"));
@@ -604,6 +627,7 @@ MainWindow::MainWindow(QWidget *parent)
                                   QStringLiteral("#222222"),
                                   QStringLiteral("#FFFFFF"),
                                   16);
+        prepareWasmButton(ui->videoButton);
     }
     if (ui->endCallButton) {
         ui->endCallButton->setText(QStringLiteral("Zoom"));
@@ -615,7 +639,18 @@ MainWindow::MainWindow(QWidget *parent)
                                   QStringLiteral("#FF3B30"),
                                   QStringLiteral("#FF3B30"),
                                   15);
+        prepareWasmButton(ui->endCallButton);
     }
+
+    QTimer::singleShot(0, this, [this]() {
+        if (ui->overlay) ui->overlay->raise();
+        if (ui->bottomArea) ui->bottomArea->raise();
+        if (ui->micButton) ui->micButton->raise();
+        if (ui->sendButton) ui->sendButton->raise();
+        if (ui->videoButton) ui->videoButton->raise();
+        if (ui->endCallButton) ui->endCallButton->raise();
+        update();
+    });
 
     wasm_face_detection_timer_ = new QTimer(this);
     wasm_face_detection_timer_->setInterval(1000);
