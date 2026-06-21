@@ -106,6 +106,9 @@ echo [INFO] Build dir = !OUT!
 if not exist "!OUT!" mkdir "!OUT!"
 if errorlevel 1 (echo [ERROR] Cannot create WASM build directory& pause& goto menu)
 
+rem 构建前清理旧 WASM 输出，避免浏览器/本地服务器/同步盘占用导致 em++ 链接阶段 WinError 5。
+call :prepare_wasm_output "!OUT!" || goto menu
+
 set "PATH=!WASM_CMAKE_DIR!;!WASM_NINJA_DIR!;!EMSDK!;!EMSDK!\upstream\emscripten;!WASM_QT_KIT!\bin;%PATH%"
 set "CC=!EMSDK!\upstream\emscripten\emcc.bat"
 set "CXX=!EMSDK!\upstream\emscripten\em++.bat"
@@ -141,6 +144,24 @@ if exist "!SRC!\docs\qtloader.js" (
 echo [OK] WASM build output: !BIN!
 echo [NOTE] Start a local web server in the output directory to run BntechEyeFriend.html.
 goto menu
+
+:prepare_wasm_output
+set "WASM_OUT=%~1"
+for %%F in ("BntechEyeFriend.wasm" "BntechEyeFriend.js" "BntechEyeFriend.html" "BntechEyeFriend.worker.js" "BntechEyeFriend.data" "BntechEyeFriend.wasm.backup") do (
+    if exist "%WASM_OUT%\%%~F" (
+        del /f /q "%WASM_OUT%\%%~F" 2>nul
+        if exist "%WASM_OUT%\%%~F" (
+            echo [ERROR] Cannot delete "%WASM_OUT%\%%~F".
+            echo [HINT] Please close browsers/dev servers using build\wasm_release, for example:
+            echo        - stop python -m http.server
+            echo        - close tabs opened from BntechEyeFriend.html
+            echo        - pause cloud sync/antivirus scan if needed
+            pause
+            exit /b 1
+        )
+    )
+)
+exit /b 0
 
 :resolve_qt_dir
 set "QT_KIT="
