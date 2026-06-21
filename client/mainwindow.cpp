@@ -574,7 +574,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (ui->micButton) {
         ui->micButton->setText(QStringLiteral("Mic"));
-        ui->micButton->setToolTip(QStringLiteral("麦克风 - 开启/关闭语音输入"));
+        ui->micButton->setToolTip(QStringLiteral("Mic - Toggle voice input"));
         applyWasmRoundButtonStyle(ui->micButton,
                                   QStringLiteral("#F5F5F5"),
                                   QStringLiteral("#FFFFFF"),
@@ -585,7 +585,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
     if (ui->sendButton) {
         ui->sendButton->setText(QStringLiteral("Cam"));
-        ui->sendButton->setToolTip(QStringLiteral("打开摄像头"));
+        ui->sendButton->setToolTip(QStringLiteral("Camera - Open camera"));
         applyWasmRoundButtonStyle(ui->sendButton,
                                   QStringLiteral("#EEEEEE"),
                                   QStringLiteral("#FFFFFF"),
@@ -596,7 +596,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
     if (ui->videoButton) {
         ui->videoButton->setText(QStringLiteral("Shot"));
-        ui->videoButton->setToolTip(QStringLiteral("截取当前画面作为背景"));
+        ui->videoButton->setToolTip(QStringLiteral("Shot - Capture current frame"));
         applyWasmRoundButtonStyle(ui->videoButton,
                                   QStringLiteral("#FFFFFF"),
                                   QStringLiteral("#F5F5F5"),
@@ -607,7 +607,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
     if (ui->endCallButton) {
         ui->endCallButton->setText(QStringLiteral("Zoom"));
-        ui->endCallButton->setToolTip(QStringLiteral("循环全屏放大已标记的人脸"));
+        ui->endCallButton->setToolTip(QStringLiteral("Zoom - Cycle marked faces"));
         applyWasmRoundButtonStyle(ui->endCallButton,
                                   QStringLiteral("#F5F5F5"),
                                   QStringLiteral("#FFFFFF"),
