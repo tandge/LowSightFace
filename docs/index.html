@@ -162,8 +162,8 @@
 
       /*
        * DOM fallback buttons for Qt/WASM rendering differences.
-       * The real Qt buttons remain underneath and handle all clicks.
-       * This overlay is visual-only, so pointer events pass through.
+       * The real Qt buttons remain underneath. Clicks are forwarded to the
+       * corresponding Qt button positions to avoid WASM canvas rendering issues.
        */
       #bnefButtonOverlay {
         position: fixed;
@@ -175,7 +175,7 @@
         justify-content: center;
         align-items: center;
         gap: 16px;
-        pointer-events: none;
+        pointer-events: auto;
         user-select: none;
         -webkit-user-select: none;
       }
@@ -193,6 +193,35 @@
         box-shadow: 0 8px 24px rgba(0,0,0,0.18);
         text-align: center;
         line-height: 1;
+        position: relative;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+
+      .bnef-visual-button::after {
+        content: attr(data-hint);
+        position: absolute;
+        left: 50%;
+        bottom: 94px;
+        transform: translateX(-50%);
+        display: none;
+        min-width: max-content;
+        max-width: min(260px, 80vw);
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: rgba(20,20,20,0.92);
+        color: #ffffff;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.25;
+        white-space: nowrap;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      }
+
+      .bnef-visual-button.show-hint::after,
+      .bnef-visual-button:hover::after {
+        display: block;
       }
 
       .bnef-visual-button.mic {
@@ -217,6 +246,48 @@
         background: #f5f5f5;
         color: #ff3b30;
         font-size: 15px;
+      }
+
+      #bnefCameraOverlay {
+        position: fixed;
+        top: max(76px, env(safe-area-inset-top));
+        right: 10px;
+        z-index: 49;
+        display: none;
+        min-width: 132px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.88);
+        color: #111111;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .bnef-camera-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 5px 0;
+        white-space: nowrap;
+      }
+
+      .bnef-camera-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid #4CAF50;
+        box-sizing: border-box;
+        background: #ffffff;
+        flex: 0 0 auto;
+      }
+
+      .bnef-camera-option.active .bnef-camera-dot {
+        background: #4CAF50;
       }
 
       @media (max-width: 420px) {
@@ -258,10 +329,14 @@
     </figure>
     <div id="screen"></div>
     <div id="bnefButtonOverlay" aria-hidden="true">
-      <div class="bnef-visual-button mic">Mic</div>
-      <div class="bnef-visual-button cam">Cam</div>
-      <div class="bnef-visual-button shot">Shot</div>
-      <div class="bnef-visual-button zoom">Zoom</div>
+      <div class="bnef-visual-button mic" data-action="0" data-hint="Mic - Toggle voice input">Mic</div>
+      <div class="bnef-visual-button cam" data-action="1" data-hint="Camera - Open camera">Cam</div>
+      <div class="bnef-visual-button shot" data-action="2" data-hint="Shot - Capture current frame">Shot</div>
+      <div class="bnef-visual-button zoom" data-action="3" data-hint="Zoom - Cycle marked faces">Zoom</div>
+    </div>
+    <div id="bnefCameraOverlay" aria-hidden="true">
+      <div class="bnef-camera-option active"><span class="bnef-camera-dot"></span><span>Camera 1</span></div>
+      <div class="bnef-camera-option"><span class="bnef-camera-dot"></span><span>Camera 2</span></div>
     </div>
 
     <script type="text/javascript">
@@ -379,9 +454,41 @@
             const status = document.querySelector('#qtstatus');
             const errorContainer = document.querySelector('#errorContainer');
             const buttonOverlay = document.querySelector('#bnefButtonOverlay');
+            const cameraOverlay = document.querySelector('#bnefCameraOverlay');
 
             checkNetwork();
             startProgressAnimation();
+
+            const forwardBottomButtonClick = (index) => {
+                const overlay = buttonOverlay;
+                if (!overlay) return;
+                overlay.style.pointerEvents = 'none';
+                const buttons = Array.from(overlay.querySelectorAll('.bnef-visual-button'));
+                const button = buttons[index];
+                const rect = button ? button.getBoundingClientRect() : null;
+                if (rect) {
+                    const x = rect.left + rect.width / 2;
+                    const y = rect.top + rect.height / 2;
+                    const target = document.elementFromPoint(x, y);
+                    if (target) {
+                        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+                        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+                        target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+                    }
+                }
+                overlay.style.pointerEvents = 'auto';
+            };
+
+            if (buttonOverlay) {
+                buttonOverlay.querySelectorAll('.bnef-visual-button').forEach((button) => {
+                    button.addEventListener('click', () => {
+                        const action = Number(button.dataset.action || 0);
+                        button.classList.add('show-hint');
+                        setTimeout(() => button.classList.remove('show-hint'), 1200);
+                        forwardBottomButtonClick(action);
+                    });
+                });
+            }
 
             const showUi = (ui) => {
                 if (ui === screen) {
@@ -391,10 +498,12 @@
                     screen.style.opacity = '1';
                     screen.style.position = 'default';
                     if (buttonOverlay) buttonOverlay.style.display = 'flex';
+                    if (cameraOverlay) cameraOverlay.style.display = 'block';
                 } else {
                     screen.style.visibility = 'hidden';
                     screen.style.opacity = '0';
                     if (buttonOverlay) buttonOverlay.style.display = 'none';
+                    if (cameraOverlay) cameraOverlay.style.display = 'none';
                     spinner.style.visibility = 'visible';
                     spinner.style.opacity = '1';
                     spinner.style.display = 'flex';
