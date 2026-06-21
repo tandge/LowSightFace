@@ -159,6 +159,76 @@
         color: rgba(255,255,255,0.8);
         margin-top: 10px;
       }
+
+      /*
+       * DOM fallback buttons for Qt/WASM rendering differences.
+       * The real Qt buttons remain underneath and handle all clicks.
+       * This overlay is visual-only, so pointer events pass through.
+       */
+      #bnefButtonOverlay {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: max(24px, env(safe-area-inset-bottom));
+        z-index: 50;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .bnef-visual-button {
+        width: 81px;
+        height: 81px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        font-family: Arial, Helvetica, sans-serif;
+        font-weight: 700;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        text-align: center;
+        line-height: 1;
+      }
+
+      .bnef-visual-button.mic {
+        background: #f5f5f5;
+        color: #444444;
+        font-size: 18px;
+      }
+
+      .bnef-visual-button.cam {
+        background: #eeeeee;
+        color: #444444;
+        font-size: 18px;
+      }
+
+      .bnef-visual-button.shot {
+        background: #ffffff;
+        color: #222222;
+        font-size: 16px;
+      }
+
+      .bnef-visual-button.zoom {
+        background: #f5f5f5;
+        color: #ff3b30;
+        font-size: 15px;
+      }
+
+      @media (max-width: 420px) {
+        #bnefButtonOverlay {
+          gap: 12px;
+          bottom: max(20px, env(safe-area-inset-bottom));
+        }
+        .bnef-visual-button {
+          width: 72px;
+          height: 72px;
+        }
+      }
     </style>
   </head>
 
@@ -187,6 +257,12 @@
       </center>
     </figure>
     <div id="screen"></div>
+    <div id="bnefButtonOverlay" aria-hidden="true">
+      <div class="bnef-visual-button mic">Mic</div>
+      <div class="bnef-visual-button cam">Cam</div>
+      <div class="bnef-visual-button shot">Shot</div>
+      <div class="bnef-visual-button zoom">Zoom</div>
+    </div>
 
     <script type="text/javascript">
         // 网络检测
@@ -302,6 +378,7 @@
             const screen = document.querySelector('#screen');
             const status = document.querySelector('#qtstatus');
             const errorContainer = document.querySelector('#errorContainer');
+            const buttonOverlay = document.querySelector('#bnefButtonOverlay');
 
             checkNetwork();
             startProgressAnimation();
@@ -313,9 +390,11 @@
                     screen.style.visibility = 'visible';
                     screen.style.opacity = '1';
                     screen.style.position = 'default';
+                    if (buttonOverlay) buttonOverlay.style.display = 'flex';
                 } else {
                     screen.style.visibility = 'hidden';
                     screen.style.opacity = '0';
+                    if (buttonOverlay) buttonOverlay.style.display = 'none';
                     spinner.style.visibility = 'visible';
                     spinner.style.opacity = '1';
                     spinner.style.display = 'flex';
