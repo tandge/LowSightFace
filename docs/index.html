@@ -247,48 +247,6 @@
         font-size: 15px;
       }
 
-      #bnefCameraOverlay {
-        position: fixed;
-        top: max(76px, env(safe-area-inset-top));
-        right: 10px;
-        z-index: 49;
-        display: none;
-        min-width: 132px;
-        padding: 10px 12px;
-        border-radius: 12px;
-        background: rgba(255,255,255,0.88);
-        color: #111111;
-        font-family: Arial, Helvetica, sans-serif;
-        font-size: 13px;
-        font-weight: 600;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-        pointer-events: none;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-
-      .bnef-camera-option {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin: 5px 0;
-        white-space: nowrap;
-      }
-
-      .bnef-camera-dot {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        border: 2px solid #4CAF50;
-        box-sizing: border-box;
-        background: #ffffff;
-        flex: 0 0 auto;
-      }
-
-      .bnef-camera-option.active .bnef-camera-dot {
-        background: #4CAF50;
-      }
-
       @media (max-width: 420px) {
         #bnefButtonOverlay {
           gap: 12px;
@@ -333,11 +291,6 @@
       <div class="bnef-visual-button shot" data-action="2" data-hint="Shot - Capture current frame">Shot</div>
       <div class="bnef-visual-button zoom" data-action="3" data-hint="Zoom - Cycle marked faces">Zoom</div>
     </div>
-    <div id="bnefCameraOverlay" aria-hidden="true">
-      <div class="bnef-camera-option active"><span class="bnef-camera-dot"></span><span>Camera 1</span></div>
-      <div class="bnef-camera-option"><span class="bnef-camera-dot"></span><span>Camera 2</span></div>
-    </div>
-
     <script type="text/javascript">
         // 网络检测
         function checkNetwork() {
@@ -453,29 +406,9 @@
             const status = document.querySelector('#qtstatus');
             const errorContainer = document.querySelector('#errorContainer');
             const buttonOverlay = document.querySelector('#bnefButtonOverlay');
-            const cameraOverlay = document.querySelector('#bnefCameraOverlay');
 
             checkNetwork();
             startProgressAnimation();
-            let cameraOverlayInterval = null;
-
-            const updateCameraOverlay = async () => {
-                if (!cameraOverlay || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-                    return;
-                }
-                try {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const cameras = devices.filter(device => device.kind === 'videoinput');
-                    const visibleCameras = cameras.length > 0 ? cameras : [{ label: 'Camera 1' }];
-                    cameraOverlay.innerHTML = visibleCameras.slice(0, 4).map((device, index) => {
-                        const label = device.label && device.label.trim() !== "" ? device.label : `Camera ${index + 1}`;
-                        const safeLabel = label.replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
-                        return `<div class="bnef-camera-option ${index === 0 ? 'active' : ''}"><span class="bnef-camera-dot"></span><span>${safeLabel}</span></div>`;
-                    }).join('');
-                } catch (e) {
-                    console.warn('Failed to update camera overlay:', e);
-                }
-            };
 
             const showUi = (ui) => {
                 if (ui === screen) {
@@ -485,24 +418,10 @@
                     screen.style.opacity = '1';
                     screen.style.position = 'default';
                     if (buttonOverlay) buttonOverlay.style.display = 'flex';
-                    if (cameraOverlay) {
-                        cameraOverlay.style.display = 'block';
-                        updateCameraOverlay();
-                        setTimeout(updateCameraOverlay, 1000);
-                        setTimeout(updateCameraOverlay, 3000);
-                        if (!cameraOverlayInterval) {
-                            cameraOverlayInterval = setInterval(updateCameraOverlay, 3000);
-                        }
-                    }
                 } else {
                     screen.style.visibility = 'hidden';
                     screen.style.opacity = '0';
                     if (buttonOverlay) buttonOverlay.style.display = 'none';
-                    if (cameraOverlay) cameraOverlay.style.display = 'none';
-                    if (cameraOverlayInterval) {
-                        clearInterval(cameraOverlayInterval);
-                        cameraOverlayInterval = null;
-                    }
                     spinner.style.visibility = 'visible';
                     spinner.style.opacity = '1';
                     spinner.style.display = 'flex';

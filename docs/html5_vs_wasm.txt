@@ -1,0 +1,99 @@
+完整需求：摄像头预览 + 切换 + 截图 + 手势放大 + 人脸识别｜HTML5 原生 vs Qt Wasm（移动端公网场景）
+最终总结论
+90% 移动端公网场景，优先 HTML5 混合方案（Video+Canvas+MediaPipe/TensorFlow.js）体验碾压 Qt Wasm；
+只有你必须复用现有 C++ 视觉算法、大量自定义图像滤镜 / 三维标注、整套 Qt 业务逻辑无法重写时，才选 Qt Wasm，且要接受加载慢、发热、兼容性坑。
+一、四大功能逐项对比（移动端核心痛点）
+1. 摄像头预览 + 前后置切换
+HTML5
+原生MediaDevices直通硬件，无中间内存拷贝，延迟10~30ms，画面跟手无拖影
+切换摄像头：枚举deviceId重建流，100ms 内完成，安卓 /iOS 微信、Safari 全兼容
+视频渲染用原生<video>硬件加速，GPU 直出，CPU 占用极低，手机不发烫
+强制 HTTPS，但浏览器权限弹窗原生统一，用户无违和感
+Qt Wasm（QCamera+QQuickVideoOutput）
+链路：浏览器视频流 → Wasm 内存拷贝 → YUV 转 RGB → QVideoFrame → WebGL 纹理，多层转换，延迟80~200ms，快速移动画面明显拖影
+切换摄像头：销毁重建 QCamera 实例，跨线程同步开销大，切换黑屏 300~800ms，低端安卓 / 微信 WebView 偶发枚举不到设备
+iOS Safari 对 Wasm 多媒体、共享内存限制严苛，经常黑屏无画面
+运行时体积巨大，首次公网加载慢，弱网白屏久
+2. 画面截图
+HTML5
+视频帧绘制到离屏 Canvas，toDataURL/toBlob原生截图，毫秒级，支持直接下载、上传
+可截取任意缩放区域、裁剪人脸局部，内存由浏览器自动回收，无泄漏
+截图逻辑轻量，无需额外运行时依赖
+Qt Wasm
+每一帧QVideoFrame::map()像素拷贝到 Wasm 堆，再转 QImage，CPU 开销翻倍
+截图会瞬间拉高内存，频繁截图低端手机卡顿、闪退
+导出图片需手动处理内存释放，极易内存泄漏
+3. 手势图像放大（双指缩放、拖拽平移）
+HTML5
+两种高性能方案：
+CSS transform:scale：纯 GPU 硬件缩放，零 CPU 开销，60fps 丝滑，适合预览缩放
+WebGL Canvas：自定义高质量插值放大，支持局部细节放大，MediaPipe 人脸框同步缩放无撕裂
+原生触摸事件touchstart/touchmove，移动端手势识别成熟，无延迟
+Qt Wasm
+QMLPinchArea手势逻辑跑在 Wasm 主线程，视频帧 + 缩放渲染双重消耗 CPU
+放大时 QQuickVideoOutput 纹理重采样为软件插值，模糊、掉帧明显，帧率掉到 15~25fps
+手势同步视频帧存在延迟，拖动画面有明显滞后
+4. 实时人脸识别（离线前端本地推理）
+HTML5 最优方案：MediaPipe Face / BlazeFace（Google）
+基于 WebGL/WebGPU GPU 推理，移动端实时30~60fps，轻量模型仅几 MB
+直接读取<video>纹理，无需像素拷贝，帧数据 GPU 直通 AI 模型，极致低延迟
+模型分片 CDN 加载，可懒加载，不阻塞页面渲染；支持人脸框、68 关键点、人脸特征提取
+独立 WebWorker 跑推理，不阻塞 UI 交互，缩放、截图、识别互不干扰
+成熟生态：face-api.js、MediaPipe 开箱即用，微信 / 安卓浏览器全兼容
+Qt Wasm 人脸识别（OpenCV/Dlib/MNN）
+双重数据拷贝：视频帧→Wasm 内存→AI 推理内存，每一帧大量像素复制，CPU 占用爆炸
+移动端 CPU 推理无 GPU 加速（Qt Wasm 不友好对接 WebGPU），实时检测仅10~20fps，卡顿严重
+OpenCV+QtMultimedia 打包后 Wasm 体积暴增，原始包 5MB+，弱网加载超时
+模型内置在 wasm 二进制里，无法按需加载，首屏下载流量巨大
+微信 WebView 内存限制下，连续识别几分钟容易页面崩溃
+二、公网移动端关键维度横向对比表
+表格
+对比维度	HTML5 原生方案	Qt Wasm（Qt Quick）
+首包加载体积	页面 + JS + 轻量模型≈300KB~2MB（可分片懒加载）	最小裁剪 + 多媒体 + OpenCV≈4~7MB（必须一次性下载）
+实时延迟（视频 + 识别）	20~50ms，画面同步人脸框无滞后	100~250ms，人脸框严重拖后画面
+切换摄像头流畅度	毫秒级切换，无黑屏	半秒黑屏，低端机偶发失效
+手势缩放性能	GPU 硬件加速，60fps 稳定	CPU 软渲染，20fps 左右卡顿
+手机功耗 / 发热	低，纯浏览器硬件管线	高，持续满载 CPU，快速发烫掉电
+移动端兼容性（微信 / Safari）	全兼容，各大厂商适配完善	iOS / 微信 WebView 大量多媒体兼容坑
+截图功能开销	极低，浏览器自动管理内存	高，频繁截图易内存泄漏
+迭代维护	前端轻量，CDN 热更新，无需重新编译	修改功能必须全量重编译 Wasm，部署笨重
+离线 AI 推理性能	WebGPU 加速，移动端流畅	仅 CPU 计算，帧率腰斩
+流量消耗（首次访问）	小，模型按需加载	极大，完整运行时一次性下载
+三、两种方案完整实现架构
+方案 A：HTML5 最优架构（推荐公网移动端）
+视频层：<video autoplay playsinline>原生摄像头流，硬件渲染
+交互层：CSS transform 实现双指缩放、平移，GPU 加速无卡顿
+AI 识别层：MediaPipe Face Mesh（WebWorker+WebGPU），直接读取 video 纹理做人脸检测，绘制人脸框到上层 Canvas
+截图层：离屏 Canvas 捕获当前缩放后的视频画面，导出 Blob 图片
+优势分层解耦：视频、手势、AI、截图各司其职，互不阻塞，性能拉满
+方案 B：Qt Wasm 架构（仅复用 C++ 算法时选用）
+QQuickWindow + QCamera + QVideoSink 获取视频帧
+QML PinchArea 实现缩放，QQuickVideoOutput 渲染画面
+每一帧QVideoFrame拷贝像素到 OpenCV Mat 做人脸检测
+QImage 导出画布实现截图
+致命缺陷：所有逻辑串行 / 共享 Wasm 主线程，视频拷贝 + AI 计算 + 手势渲染三重 CPU 压力
+四、什么时候选 HTML5，什么时候被迫选 Qt Wasm
+✅ 选 HTML5（绝大多数场景）
+需求仅：摄像头预览、前后置切换、手势缩放、截图、前端离线人脸识别
+优势：秒开、低延迟、省电、弱网友好、兼容性拉满、迭代成本低
+✅ 仅满足全部条件才选 Qt Wasm
+已有大量成熟 C++ 视觉算法（自定义人脸比对、图像矫正、复杂滤镜、三维重建），重写 JS 成本极高
+整套产品基于 Qt Quick 开发，需要统一桌面 / 嵌入式 / 网页三端一套代码
+必须深度自定义视频渲染管线、Shader 特效，且不接受 WebGL 二次开发
+代价：接受加载慢、画面延迟、手机发热、大量移动端兼容踩坑
+五、HTML5 移动端公网优化要点（直接落地）
+HTTPS 部署，CDN 托管 MediaPipe 轻量化模型，开启 brotli 压缩
+识别放入 WebWorker，避免阻塞手势缩放、截图操作
+缩放只用transform: scale()，不实时重绘 Canvas，最大化 GPU 加速
+摄像头分辨率限制 720P 以内，降低 AI 推理开销，提升帧率
+截图复用离屏 Canvas，不频繁创建销毁画布，防止内存泄漏
+兼容 iOS 微信：video 标签强制playsinline muted，禁止自动全屏
+六、如果必须用 Qt Wasm，极限优化手段
+Qt 编译裁剪：关闭文件系统、音频、图表、QtQuickControls，仅保留 Core/Gui/Qml/Quick/Multimedia/OpenCV
+Emscripten 链接参数 -Oz -s SIMD=1 -s FILESYSTEM=0 -s ALLOW_MEMORY_GROWTH=1
+QCamera 固定低分辨率 640×480，减少帧像素拷贝量
+人脸检测降采样，每 2 帧推理一次，降低 CPU 负载
+预加载进度条，缓解用户白屏焦虑
+服务器开启 brotli，静态资源长期缓存
+一句话总结
+纯网页移动端、公网、需要流畅摄像头 + 缩放 + 截图 + 人脸识别：直接 HTML5 MediaPipe 方案，用户体验全方位领先 Qt Wasm；只有重度复用现有 Qt/C++ 视觉业务代码，才考虑 Wasm 方案。

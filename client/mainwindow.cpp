@@ -649,6 +649,19 @@ MainWindow::MainWindow(QWidget *parent)
         if (ui->sendButton) ui->sendButton->raise();
         if (ui->videoButton) ui->videoButton->raise();
         if (ui->endCallButton) ui->endCallButton->raise();
+        // 确保右侧中部的摄像头选择 radio button group 可见
+        if (ui->cameraGroupBox) {
+            ui->cameraGroupBox->setVisible(true);
+            ui->cameraGroupBox->raise();
+        }
+        if (ui->cameraRadioButton1) {
+            ui->cameraRadioButton1->setVisible(true);
+            ui->cameraRadioButton1->raise();
+        }
+        if (ui->cameraRadioButton2) {
+            ui->cameraRadioButton2->setVisible(true);
+            ui->cameraRadioButton2->raise();
+        }
         update();
     });
 
