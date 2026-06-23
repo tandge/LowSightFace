@@ -163,7 +163,7 @@ EM_ASYNC_JS(char *, wasmEnumerateVideoDevices, (), {
         }
 
         const cameras = cameraDevices.map((device, index) => ({
-            label: device.label && device.label.trim() !== "" ? device.label : `摄像头 ${index + 1}`,
+            label: device.label && device.label.trim() !== '' ? device.label : `摄像头 ${index + 1}`,
             deviceId: device.deviceId || `device_${index}`,
             groupId: device.groupId || `group_${index}`
         }));
@@ -183,33 +183,7 @@ EM_ASYNC_JS(char *, wasmEnumerateVideoDevices, (), {
 EM_ASYNC_JS(char *, wasmRunRetinaFaceOnPng, (const char *pngDataUrlPtr), {
     const pngDataUrl = UTF8ToString(pngDataUrlPtr);
     const modelUrl = 'models/retinaface.onnx';
-
-    // 动态获取当前页面 URL 信息
-    const currentOrigin = window.location.origin;
-    const currentPath = window.location.pathname;
-
-    // 构建模型下载的绝对 URL
-    // 解析当前路径，找到正确的 basePath
-    const scriptElements = document.getElementsByTagName('script');
-    let appBasePath = "";
-
-    // 找到加载当前应用的脚本标签（BntechEyeFriend.js）
-    for (let i = 0; i < scriptElements.length; i++) {
-        const src = scriptElements[i].src;
-        if (src && src.includes('BntechEyeFriend')) {
-            appBasePath = src.substring(0, src.lastIndexOf('/') + 1);
-            break;
-        }
-    }
-
-    // 如果找不到脚本标签，则使用当前路径作为 basePath
-    if (!appBasePath) {
-        appBasePath = currentOrigin + currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-    }
-
-    // 构建模型的绝对下载路径
-    const absoluteModelUrl = appBasePath + 'models/retinaface.onnx';
-
+    const absoluteModelUrl = 'https://bynbj.com/tools/eye_friend/models/retinaface.onnx';
     const modelPath = '/models/retinaface.onnx';
     const ortScriptUrl = 'onnxruntime/ort.min.js';
     const inputSize = 640;
@@ -513,17 +487,26 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->endCallButton, &QPushButton::clicked, this, &MainWindow::onEndCallClicked);
 
 #ifdef Q_OS_WASM
-    // 使用系统默认字体，避免尝试加载不存在的字体文件
-    // 这将防止在外部服务器部署时按钮文字无法显示的问题
-    qDebug() << "Using system default font for WebAssembly in MainWindow";
-    QString wasmFontFamily = QStringLiteral("Arial"); // 使用常见的系统字体
-    QFont wasmFont(wasmFontFamily);
-    wasmFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
-    qApp->setFont(wasmFont);
-    setFont(wasmFont);
+    const int fontId = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/NotoSansSC-VF.ttf"));
+    QString wasmFontFamily = QStringLiteral("sans-serif");
+    if (fontId >= 0) {
+        const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+        if (!families.isEmpty()) {
+            wasmFontFamily = families.first();
+            QFont wasmFont(wasmFontFamily);
+            wasmFont.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferMatch));
+            qApp->setFont(wasmFont);
+            setFont(wasmFont);
+        }
+    } else {
+        qWarning() << "Failed to load bundled Chinese font in MainWindow";
+    }
 
+    const QString wasmFontCss = QStringLiteral("font-family: '%1', sans-serif;").arg(wasmFontFamily);
     setStyleSheet(styleSheet() + QStringLiteral("\n"
-        "QToolTip { color: #FFFFFF; background-color: #2C2C2C; border: 1px solid #777777; padding: 6px; }\n"));
+        "QWidget, QLabel, QComboBox, QComboBox QAbstractItemView, QToolTip { %1 }\n"
+        "QToolTip { color: #FFFFFF; background-color: #2C2C2C; border: 1px solid rgba(255,255,255,0.35); padding: 6px; }\n")
+        .arg(wasmFontCss));
 
     for (QWidget *widget : findChildren<QWidget *>()) {
         QFont widgetFont(wasmFontFamily);
@@ -531,139 +514,22 @@ MainWindow::MainWindow(QWidget *parent)
         widget->setFont(widgetFont);
     }
 
-    auto applyWasmRoundButtonStyle = [](QPushButton *button,
-                                        const QString &normalBg,
-                                        const QString &hoverBg,
-                                        const QString &checkedBg,
-                                        const QString &normalColor,
-                                        const QString &checkedColor,
-                                        int fontSize) {
-        if (!button) {
-            return;
-        }
-        button->setMinimumSize(81, 81);
-        button->setMaximumSize(81, 81);
-        button->setFlat(false);
-        button->setStyleSheet(QStringLiteral(
-            "QPushButton {"
-            "  min-width: 81px; max-width: 81px;"
-            "  min-height: 81px; max-height: 81px;"
-            "  border: none;"
-            "  border-radius: 40px;"
-            "  background-color: %1;"
-            "  color: %4;"
-            "  font-size: %6px;"
-            "  font-weight: 700;"
-            "}"
-            "QPushButton:hover {"
-            "  background-color: %2;"
-            "}"
-            "QPushButton:pressed {"
-            "  background-color: %2;"
-            "}"
-            "QPushButton:checked {"
-            "  background-color: %3;"
-            "  color: %5;"
-            "}"
-            "QPushButton:checked:hover {"
-            "  background-color: %3;"
-            "}")
-            .arg(normalBg, hoverBg, checkedBg, normalColor, checkedColor)
-            .arg(fontSize));
-    };
-
-    if (ui->overlay) {
-        ui->overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-        ui->overlay->raise();
-    }
-    if (ui->bottomArea) {
-        ui->bottomArea->setAttribute(Qt::WA_StyledBackground, true);
-        ui->bottomArea->setStyleSheet(QStringLiteral("QWidget#bottomArea { background: transparent; }"));
-        ui->bottomArea->raise();
-    }
-
-    auto prepareWasmButton = [](QPushButton *button) {
-        if (!button) {
-            return;
-        }
-        button->setAttribute(Qt::WA_StyledBackground, true);
-        button->setAutoFillBackground(false);
-        button->raise();
-        button->show();
-        button->update();
-    };
-
     if (ui->micButton) {
         ui->micButton->setText(QStringLiteral("Mic"));
-        ui->micButton->setToolTip(QStringLiteral("Mic - Toggle voice input"));
-        applyWasmRoundButtonStyle(ui->micButton,
-                                  QStringLiteral("#F5F5F5"),
-                                  QStringLiteral("#FFFFFF"),
-                                  QStringLiteral("#4CAF50"),
-                                  QStringLiteral("#444444"),
-                                  QStringLiteral("#FFFFFF"),
-                                  18);
-        prepareWasmButton(ui->micButton);
+        ui->micButton->setToolTip(QStringLiteral("麦克风 - 开启/关闭语音输入"));
     }
     if (ui->sendButton) {
         ui->sendButton->setText(QStringLiteral("Cam"));
-        ui->sendButton->setToolTip(QStringLiteral("Camera - Open camera"));
-        applyWasmRoundButtonStyle(ui->sendButton,
-                                  QStringLiteral("#EEEEEE"),
-                                  QStringLiteral("#FFFFFF"),
-                                  QStringLiteral("#EEEEEE"),
-                                  QStringLiteral("#444444"),
-                                  QStringLiteral("#444444"),
-                                  18);
-        prepareWasmButton(ui->sendButton);
+        ui->sendButton->setToolTip(QStringLiteral("打开摄像头"));
     }
     if (ui->videoButton) {
         ui->videoButton->setText(QStringLiteral("Shot"));
-        ui->videoButton->setToolTip(QStringLiteral("Shot - Capture current frame"));
-        applyWasmRoundButtonStyle(ui->videoButton,
-                                  QStringLiteral("#FFFFFF"),
-                                  QStringLiteral("#F5F5F5"),
-                                  QStringLiteral("#FF3B30"),
-                                  QStringLiteral("#222222"),
-                                  QStringLiteral("#FFFFFF"),
-                                  16);
-        prepareWasmButton(ui->videoButton);
+        ui->videoButton->setToolTip(QStringLiteral("截取当前画面作为背景"));
     }
     if (ui->endCallButton) {
         ui->endCallButton->setText(QStringLiteral("Zoom"));
-        ui->endCallButton->setToolTip(QStringLiteral("Zoom - Cycle marked faces"));
-        applyWasmRoundButtonStyle(ui->endCallButton,
-                                  QStringLiteral("#F5F5F5"),
-                                  QStringLiteral("#FFFFFF"),
-                                  QStringLiteral("#F5F5F5"),
-                                  QStringLiteral("#FF3B30"),
-                                  QStringLiteral("#FF3B30"),
-                                  15);
-        prepareWasmButton(ui->endCallButton);
+        ui->endCallButton->setToolTip(QStringLiteral("循环全屏放大已标记的人脸"));
     }
-
-    QTimer::singleShot(0, this, [this]() {
-        if (ui->overlay) ui->overlay->raise();
-        if (ui->bottomArea) ui->bottomArea->raise();
-        if (ui->micButton) ui->micButton->raise();
-        if (ui->sendButton) ui->sendButton->raise();
-        if (ui->videoButton) ui->videoButton->raise();
-        if (ui->endCallButton) ui->endCallButton->raise();
-        // 确保右侧中部的摄像头选择 radio button group 可见
-        if (ui->cameraGroupBox) {
-            ui->cameraGroupBox->setVisible(true);
-            ui->cameraGroupBox->raise();
-        }
-        if (ui->cameraRadioButton1) {
-            ui->cameraRadioButton1->setVisible(true);
-            ui->cameraRadioButton1->raise();
-        }
-        if (ui->cameraRadioButton2) {
-            ui->cameraRadioButton2->setVisible(true);
-            ui->cameraRadioButton2->raise();
-        }
-        update();
-    });
 
     wasm_face_detection_timer_ = new QTimer(this);
     wasm_face_detection_timer_->setInterval(1000);

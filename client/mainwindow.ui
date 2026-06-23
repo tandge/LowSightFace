@@ -296,7 +296,7 @@ QRadioButton::indicator:checked {
             <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
             <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
             <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
-            <property name="toolTip"><string>Mic - Toggle voice input</string></property>
+            <property name="toolTip"><string>麦克风 - 开启/关闭语音输入</string></property>
             <property name="text"><string>🎤</string></property>
             <property name="checkable"><bool>true</bool></property>
            </widget>
@@ -306,7 +306,7 @@ QRadioButton::indicator:checked {
             <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
             <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
             <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
-            <property name="toolTip"><string>Camera - Open camera</string></property>
+            <property name="toolTip"><string>发送 - 上传画面与识别文本</string></property>
             <property name="text"><string>📤</string></property>
            </widget>
           </item>
@@ -315,7 +315,7 @@ QRadioButton::indicator:checked {
             <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
             <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
             <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
-            <property name="toolTip"><string>Shot - Capture current frame</string></property>
+            <property name="toolTip"><string>视频通话 - 开启/关闭</string></property>
             <property name="text"><string>🎥</string></property>
             <property name="checkable"><bool>true</bool></property>
            </widget>
@@ -325,7 +325,7 @@ QRadioButton::indicator:checked {
             <property name="minimumSize"><size><width>81</width><height>81</height></size></property>
             <property name="maximumSize"><size><width>81</width><height>81</height></size></property>
             <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
-            <property name="toolTip"><string>Zoom - Cycle marked faces</string></property>
+            <property name="toolTip"><string>结束通话</string></property>
             <property name="text"><string>✕</string></property>
            </widget>
           </item>
