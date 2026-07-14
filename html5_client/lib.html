@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人脸库管理工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            height: 95vh;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 24px;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            flex-shrink: 0;
+        }
+
+        /* ---------- 输入区 (30% 高度) ---------- */
+        .input-section {
+            flex: 0 0 30%;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border-bottom: 2px solid #e0e0e0;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .input-section label {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .input-section input[type="text"] {
+            width: 100%;
+            padding: 10px 14px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+            outline: none;
+        }
+
+        .input-section input[type="text"]:focus {
+            border-color: #667eea;
+        }
+
+        .input-section textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.3s;
+            flex: 1;
+            min-height: 60px;
+        }
+
+        .input-section textarea:focus {
+            border-color: #667eea;
+        }
+
+        .btn-add {
+            align-self: flex-end;
+            padding: 10px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+        }
+
+        .btn-add:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+        }
+
+        .btn-add:active {
+            transform: translateY(0);
+        }
+
+        /* ---------- 输出区 (70% 高度) ---------- */
+        .output-section {
+            flex: 0 0 70%;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
+        }
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .output-header span {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .btn-copy {
+            padding: 8px 22px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.2s;
+            letter-spacing: 1px;
+        }
+
+        .btn-copy:hover {
+            background: #218838;
+            transform: translateY(-1px);
+        }
+
+        .btn-copy:active {
+            transform: translateY(0);
+        }
+
+        .btn-copy.copied {
+            background: #6c757d;
+        }
+
+        .output-section textarea {
+            flex: 1;
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            resize: none;
+            outline: none;
+            background: #f8f9fa;
+            color: #333;
+            min-height: 0;
+        }
+
+        .output-section textarea:focus {
+            border-color: #667eea;
+            background: #fff;
+        }
+
+        /* Toast 提示消息 */
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .toast.show { opacity: 1; }
+        .toast.success { background: #28a745; }
+        .toast.error { background: #dc3545; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">人脸库管理工具</div>
+
+        <!-- 输入区 (30% 高度) -->
+        <div class="input-section">
+            <label for="nameInput">Name（姓名）</label>
+            <input type="text" id="nameInput" placeholder="请输入姓名，例如：张三">
+
+            <label for="valueInput">Value（512维人脸特征向量 JSON 数组）</label>
+            <textarea id="valueInput" placeholder="请输入人脸特征向量 JSON 数组，例如：[0.011526,-0.013068,...]"></textarea>
+
+            <button class="btn-add" onclick="addRecord()">添 加</button>
+        </div>
+
+        <!-- 输出区 (70% 高度) -->
+        <div class="output-section">
+            <div class="output-header">
+                <span>人脸库 JSON（可编辑）</span>
+                <button class="btn-copy" id="btnCopy" onclick="copyResult()">复 制</button>
+            </div>
+            <textarea id="resultBox">{}</textarea>
+        </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // 人脸库数据
+        var faceLib = {};
+
+        // DOM 元素
+        var nameInput  = document.getElementById('nameInput');
+        var valueInput = document.getElementById('valueInput');
+        var resultBox  = document.getElementById('resultBox');
+        var btnCopy    = document.getElementById('btnCopy');
+        var toast      = document.getElementById('toast');
+
+        /* 显示 Toast 提示消息 */
+        function showToast(msg, type) {
+            type = type || 'success';
+            toast.textContent = msg;
+            toast.className = 'toast ' + type + ' show';
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(function () {
+                toast.className = 'toast';
+            }, 2000);
+        }
+
+        /* 刷新结果框 */
+        function updateResultBox() {
+            resultBox.value = JSON.stringify(faceLib, null, 2);
+        }
+
+        /* 当用户手动编辑结果框时，同步回 faceLib */
+        resultBox.addEventListener('input', function () {
+            try {
+                var parsed = JSON.parse(resultBox.value);
+                if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                    faceLib = parsed;
+                }
+            } catch (e) {
+                // JSON 暂时不合法，忽略
+            }
+        });
+
+        /* 添加记录 */
+        function addRecord() {
+            var name     = nameInput.value.trim();
+            var valueStr = valueInput.value.trim();
+
+            // 校验 name
+            if (!name) {
+                showToast('请输入 Name（姓名）', 'error');
+                nameInput.focus();
+                return;
+            }
+
+            // 校验 value
+            if (!valueStr) {
+                showToast('请输入 Value（人脸特征向量）', 'error');
+                valueInput.focus();
+                return;
+            }
+
+            // 解析 value 为 JSON 数组
+            var valueArr;
+            try {
+                valueArr = JSON.parse(valueStr);
+            } catch (e) {
+                showToast('Value 不是合法的 JSON 格式，请检查', 'error');
+                valueInput.focus();
+                return;
+            }
+
+            if (!Array.isArray(valueArr)) {
+                showToast('Value 必须是一个 JSON 数组', 'error');
+                valueInput.focus();
+                return;
+            }
+
+            // 同名检查
+            if (faceLib.hasOwnProperty(name)) {
+                if (!confirm('已存在名为 "' + name + '" 的记录，是否覆盖？')) {
+                    return;
+                }
+            }
+
+            // 写入人脸库
+            faceLib[name] = valueArr;
+            updateResultBox();
+
+            // 清空输入框
+            nameInput.value  = '';
+            valueInput.value = '';
+
+            showToast('已添加 "' + name + '" 到人脸库（共 ' + valueArr.length + ' 维特征）');
+            nameInput.focus();
+        }
+
+        /* 复制结果到剪贴板 */
+        function copyResult() {
+            var text = resultBox.value;
+            if (!text || text === '{}') {
+                showToast('人脸库为空，没有内容可复制', 'error');
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    setCopied();
+                }).catch(function () {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function setCopied() {
+            btnCopy.textContent = '已复制';
+            btnCopy.classList.add('copied');
+            showToast('已复制到剪贴板');
+            setTimeout(function () {
+                btnCopy.textContent = '复 制';
+                btnCopy.classList.remove('copied');
+            }, 2000);
+        }
+
+        /* 降级复制方案 */
+        function fallbackCopy(text) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left     = '-9999px';
+            ta.style.top      = '-9999px';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            try {
+                document.execCommand('copy');
+                setCopied();
+            } catch (e) {
+                showToast('复制失败，请手动选择复制', 'error');
+            }
+            document.body.removeChild(ta);
+        }
+
+        /* 键盘快捷键 */
+        nameInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                valueInput.focus();
+            }
+        });
+
+        valueInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                addRecord();
+            }
+        });
+
+        // 初始化显示
+        updateResultBox();
+    </script>
+
+</body>
+</html>

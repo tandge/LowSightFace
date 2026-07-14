@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TTS - Elapsed Seconds Speaker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+  .container { max-width: 500px; width: 100%; background: #16213e; border-radius: 16px; padding: 40px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: center; }
+  h1 { font-size: 1.6em; margin-bottom: 8px; color: #e94560; }
+  .subtitle { font-size: 0.85em; color: #888; margin-bottom: 30px; }
+  .timer-display { font-size: 5em; font-weight: bold; color: #e94560; margin: 20px 0; font-variant-numeric: tabular-nums; }
+  .timer-label { font-size: 0.9em; color: #aaa; margin-bottom: 30px; }
+  .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  button { padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: 600; transition: all 0.2s; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-start { background: #4caf50; color: #fff; } .btn-start:hover:not(:disabled) { background: #43a047; }
+  .btn-stop { background: #f44336; color: #fff; } .btn-stop:hover:not(:disabled) { background: #d32f2f; }
+  .status { font-size: 0.85em; padding: 10px 14px; border-radius: 8px; margin-top: 16px; }
+  .status.idle { background: #1a3a5c; color: #7ec8e3; }
+  .status.running { background: #1a3c1a; color: #7ee37e; }
+  .status.stopped { background: #3c3a1a; color: #e3d77e; }
+  .status.error { background: #3c1a1a; color: #e37e7e; }
+  .log-box { margin-top: 20px; text-align: left; }
+  .log-box h3 { font-size: 0.85em; color: #888; margin-bottom: 8px; }
+  #logArea { width: 100%; min-height: 120px; padding: 10px; font-family: "Courier New", monospace; font-size: 0.75em; background: #1a1a2e; color: #0f0; border: 1px solid #333; border-radius: 6px; resize: vertical; }
+  .pulse { animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>TTS Timer</h1>
+  <p class="subtitle">Web Speech API | Reads elapsed seconds every 2s</p>
+  <div class="timer-display" id="timerDisplay">0</div>
+  <div class="timer-label" id="timerLabel">seconds since start</div>
+  <div class="btn-row">
+    <button class="btn-start" id="btnStart">Start</button>
+    <button class="btn-stop" id="btnStop" disabled>Stop</button>
+  </div>
+  <div id="statusBox" class="status idle">Ready - Click Start to begin</div>
+  <div class="log-box">
+    <h3>Speak Log</h3>
+    <textarea id="logArea" readonly placeholder="TTS speak events will appear here..."></textarea>
+  </div>
+</div>
+
+<script>
+const timerDisplay = document.getElementById('timerDisplay');
+const timerLabel = document.getElementById('timerLabel');
+const btnStart = document.getElementById('btnStart');
+const btnStop = document.getElementById('btnStop');
+const statusBox = document.getElementById('statusBox');
+const logArea = document.getElementById('logArea');
+
+let startTime = null;
+let displayTimer = null;
+let lastSpokenSecond = 0;
+
+function getTimestamp() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return now.getFullYear() + '-' +
+    pad(now.getMonth() + 1) + '-' +
+    pad(now.getDate()) + ' ' +
+    pad(now.getHours()) + ':' +
+    pad(now.getMinutes()) + ':' +
+    pad(now.getSeconds());
+}
+
+function getElapsedSeconds() {
+  if (!startTime) return 0;
+  return Math.floor((Date.now() - startTime) / 1000);
+}
+
+function appendLog(msg) {
+  logArea.value += msg + '\n';
+  logArea.scrollTop = logArea.scrollHeight;
+}
+
+function speak(text) {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) {
+      appendLog('Error: SpeechSynthesis not supported');
+      resolve();
+      return;
+    }
+
+    // IMPORTANT: Do NOT call cancel() here — it breaks the iOS speech session.
+    // Only cancel when the user explicitly stops the timer.
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+
+    utterance.onend = finish;
+    utterance.onerror = (e) => {
+      appendLog('TTS error: ' + (e.error || 'unknown'));
+      finish();
+    };
+
+    // iOS may need resume (some WebKit versions pause the queue)
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
+    window.speechSynthesis.speak(utterance);
+
+    // Fallback timeout: Chrome/iOS may not fire onend for short utterances
+    setTimeout(finish, 5000);
+  });
+}
+
+let speechLoopActive = false;
+
+function scheduleNextSpeech() {
+  if (!speechLoopActive) return;
+
+  const elapsed = getElapsedSeconds();
+  if (elapsed > 0 && elapsed !== lastSpokenSecond) {
+    lastSpokenSecond = elapsed;
+    const text = elapsed + '秒';
+    const ts = getTimestamp();
+    appendLog(ts + ' Speaking: ' + text);
+    speak(text).then(() => {
+      appendLog(ts + ' Done: ' + text);
+      // Chain next utterance — onend chaining is reliable on iOS
+      scheduleNextSpeech();
+    });
+  } else {
+    // Not time to speak yet; check again shortly
+    setTimeout(scheduleNextSpeech, 500);
+  }
+}
+
+function startTTS() {
+  if (startTime) return;
+
+  startTime = Date.now();
+  lastSpokenSecond = 0;
+
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  statusBox.className = 'status running';
+  statusBox.textContent = 'Running - speaking elapsed seconds every 2s';
+  timerDisplay.classList.add('pulse');
+
+  appendLog('========== TTS Started ' + getTimestamp() + ' ==========');
+
+  // Update display every 100ms for smooth timer
+  displayTimer = setInterval(() => {
+    timerDisplay.textContent = getElapsedSeconds();
+  }, 100);
+
+  // iOS workaround: preload voices (required for some iOS versions)
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    // Prime the speech session with a silent utterance from the user gesture.
+    // This establishes the iOS "user gesture" speech session so subsequent
+    // speak() calls (even from setTimeout) will work.
+    var prime = new SpeechSynthesisUtterance('');
+    prime.volume = 0;
+    prime.rate = 2;
+    prime.onend = function() {
+      // Now the iOS speech session is active; start the real loop
+      speechLoopActive = true;
+      scheduleNextSpeech();
+    };
+    prime.onerror = function() {
+      // Even if priming fails, try the loop anyway
+      speechLoopActive = true;
+      scheduleNextSpeech();
+    };
+    window.speechSynthesis.speak(prime);
+  } else {
+    speechLoopActive = true;
+    scheduleNextSpeech();
+  }
+}
+
+function stopTTS() {
+  if (!startTime) return;
+
+  speechLoopActive = false;
+
+  if (displayTimer) {
+    clearInterval(displayTimer);
+    displayTimer = null;
+  }
+
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+
+  const elapsed = getElapsedSeconds();
+  startTime = null;
+
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  statusBox.className = 'status stopped';
+  statusBox.textContent = 'Stopped at ' + elapsed + ' seconds';
+  timerDisplay.classList.remove('pulse');
+
+  appendLog('========== TTS Stopped ' + getTimestamp() + ' (total: ' + elapsed + 's) ==========');
+}
+
+btnStart.addEventListener('click', startTTS);
+btnStop.addEventListener('click', stopTTS);
+
+// Check browser support
+if (!window.speechSynthesis) {
+  statusBox.className = 'status error';
+  statusBox.textContent = 'Error: SpeechSynthesis API not supported in this browser';
+  btnStart.disabled = true;
+}
+
+console.log('[main] tts.html loaded');
+</script>
+
+</body>
+</html>
