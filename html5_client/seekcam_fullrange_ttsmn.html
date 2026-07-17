@@ -90,6 +90,7 @@
   .summary-bar .stat .label { color: #888; }
 
 </style>
+<script src="js/Dexie.js"></script>
 </head>
 <body>
 <div class="container">
@@ -556,6 +557,24 @@ galleryInput.addEventListener('input', () => parseFaceLibrary());
 // ============ Load Face Library from URL ============
 
 async function loadFaceLibraryFromURL() {
+  // Try IndexedDB first
+  try {
+    showSpinner(galleryStatus, 'Loading face library from local DB...');
+    var db = new Dexie("face_feature_db");
+    db.version(2).stores({ features: "key" });
+    await db.open();
+    var item = await db.features.get("face_feature");
+    if (item && item.data) {
+      galleryInput.value = JSON.stringify(item.data);
+      parseFaceLibrary();
+      console.log('[load] Face library loaded from IndexedDB:', Object.keys(item.data).length, 'persons');
+      return;
+    }
+  } catch (err) {
+    console.warn('[load] IndexedDB load failed, trying file:', err.message);
+  }
+
+  // Fallback to file
   const url = './face_feature.json';
   try {
     showSpinner(galleryStatus, 'Loading face library from server...');
