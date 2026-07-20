@@ -1,176 +1,74 @@
-# LowSightFace（低视力识人）
+# LowSightFace
 
-> 一个辅助低视力或认脸困难人群识别身边人的解决方案。
+> An assistive solution for individuals with low vision or face recognition difficulties.
 
-## 项目简介
+## Overview
 
-**BntechEyeFriend** 是一款专为**低视力人群**和**面孔失认症（脸盲症）患者**设计的辅助工具。通过摄像头持续捕捉画面，实时检测并识别人脸库中已录入的人，一旦识别成功，立即通过语音播报告诉用户"这是谁"，让用户无需看清面孔也能准确辨认身边的人。
+**BntechEyeFriend** (LowSightFace) is an assistive tool designed for **people with low vision** and **prosopagnosia (face blindness)**. It continuously captures video through a camera, detects and recognizes faces in real time against a local face library, and instantly announces recognized names via voice — allowing users to identify people around them without needing to see clearly.
 
-## 核心功能
+## Core Features
 
-- **实时人脸检测**：摄像头持续捕捉画面，自动检测画面中的人脸
-- **人脸识别匹配**：将检测到的人脸与本地人脸库进行比对，精准识别已录入的人员
-- **语音播报**：识别成功后通过 TTS 语音合成播报姓名，用户无需看屏幕即可获知结果
-- **人脸库管理**：支持添加、删除、管理人脸库中的人员信息
-- **摄像头切换**：支持多摄像头设备选择和前后摄像头切换
-- **人脸放大查看**：点击检测到的人脸框，可将其放大至全屏查看细节
+- **Real-time face detection** — Automatically detects faces from live camera feed
+- **Face recognition & matching** — Compares detected faces against a local face library
+- **Text-to-Speech (TTS) announcement** — Speaks recognized names aloud; no need to look at the screen
+- **Face library management** — Add, remove, and manage enrolled persons
+- **Multi-camera support** — Switch between front/rear cameras and external devices
+- **Face zoom** — Click a face bounding box to enlarge it to fullscreen for detail inspection
 
-## 特点
+## Privacy & Security
 
-### 🔒 隐私安全，纯本地识别
+All face data and recognition inference run **entirely locally**. No images or face features are uploaded to any server. The system uses ONNX Runtime / MediaPipe for on-device inference with no third-party cloud APIs.
 
-- **人脸数据不上传**：所有人脸图像和人脸库数据完全存储在本地设备，绝不通过网络上传
-- **纯本地推理**：人脸检测和识别模型均在本地运行，无需依赖云端服务
-- **无第三方数据共享**：不接入任何第三方人脸识别 API，保障用户隐私不被泄露
+## Platform Support
 
-### 📱 多平台覆盖
+| Platform | Status |
+|----------|--------|
+| HTML5 (Web) | 🚧 In development |
+| Qt Desktop (Windows/Linux) | ✅ Available |
+| Qt WASM (Browser) | ✅ Available |
+| Android / iOS | 📋 Planned |
+| HarmonyOS | 📋 Planned |
+| ESP32-CAM Hardware | 🚧 In development |
 
-| 平台 | 状态 | 说明 |
-|------|------|------|
-| HTML5 网页版 | 🚧 开发中 | 纯前端方案，打开浏览器即可使用 |
-| Qt 桌面版 (Windows/Linux) | ✅ 已有 | 基于 Qt 6 + OpenCV + ONNX Runtime |
-| Qt WASM 版 (浏览器) | ✅ 已有 | 编译为 WebAssembly 在浏览器中运行 |
-| Android 移动版 | 📋 规划中 | 未来支持 |
-| iOS 移动版 | 📋 规划中 | 未来支持 |
-| 鸿蒙 (HarmonyOS) | 📋 规划中 | 未来支持 |
-| ESP32-CAM 硬件端 | 🚧 开发中 | Arduino 摄像头硬件方案 |
-
-
-## 快速开始
-
-### HTML5 版本
+## Quick Start (HTML5)
 
 ```bash
-# 进入 HTML5 目录
-cd html5
-
-# 本地预览（摄像头需要 HTTPS 或 localhost）
+cd html5_client
 python -m http.server 8080 --bind 127.0.0.1
-
-# 浏览器打开
-# http://localhost:8080
+# Open http://localhost:8080
 ```
 
-### Qt 桌面版本
+## Tech Stack
 
-依赖：
-- Qt 6.6+
-- OpenCV 4.x
-- ONNX Runtime
+- **Face Detection**: ONNX Runtime (desktop) / Google MediaPipe + BlazeFace (HTML5)
+- **Face Recognition**: MobileFaceNet via ONNX Runtime
+- **TTS**: Web Speech API / system-native TTS engine
 
-```bash
-# 设置环境变量
-set OPENCV_DIR=C:/opencv/opencv/build
-set ONNXRUNTIME_DIR=C:/onnxruntime
 
-# 编译
-qmake BntechEyeFriend.pro
-make
-```
+## Usage
 
-## 技术架构
+1. Launch the app and grant camera permission
+2. Enroll face photos and names in the face library
+3. Point the camera at people — the system auto-detects and matches
+4. Recognized names are announced via TTS
+5. Click face boxes to zoom in for detail
 
-```
-┌──────────────────────────────────────────┐
-│                 应用层                     │
-│  ┌─────────┐  ┌──────────┐  ┌─────────┐  │
-│  │ 摄像头管理│  │ 人脸检测  │  │ 人脸识别 │  │
-│  └─────────┘  └──────────┘  └─────────┘  │
-│  ┌─────────┐  ┌──────────┐  ┌─────────┐  │
-│  │ 人脸库   │  │ 语音合成  │  │ 语音输入 │  │
-│  └─────────┘  └──────────┘  └─────────┘  │
-├──────────────────────────────────────────┤
-│              推理引擎层                    │
-│  ┌──────────┐  ┌───────────────┐         │
-│  │ ONNX     │  │ MobileFaceNet │         │
-│  │ Runtime  │  │  MediaPipe    │         │
-│  └──────────┘  └───────────────┘         │
-├──────────────────────────────────────────┤
-│              平台适配层                    │
-│  Qt/WASM  │  HTML5/JS  │  Arduino       │
-└──────────────────────────────────────────┘
-```
+## Use Cases
 
-- **人脸检测**：ONNX Runtime（桌面版）/ Google MediaPipe + MobileFaceNet（HTML5 版）
-- **人脸识别**：基于深度学习模型的特征提取与比对
-- **语音合成**：系统原生 TTS 引擎 / Web Speech API
-- **语音识别**：Whisper 模型（用于语音指令输入,开发中）
+- Social scenarios for visually impaired individuals
+- Face blindness (prosopagnosia) assistance
+- Memory aid for elderly users
+- Multi-person identification in meetings and gatherings
 
-## 项目结构
+## License
 
-```
-bntech_eye_friend/
-├── client/              # Qt/C++ 客户端源码
-│   ├── main.cpp         # 程序入口
-│   ├── mainwindow.*     # 主窗口
-│   ├── camerawidget.*   # 摄像头组件
-│   ├── facedetector.*   # 人脸检测
-│   ├── facerecognizer.* # 人脸识别
-│   ├── facedatabase.*   # 人脸库管理
-│   ├── whisperclient.*  # 语音识别客户端
-│   └── pulsedots.*      # 脉冲动画
-├── html5/               # HTML5 纯前端版本
-│   └── index.html       # 单文件应用
-├── arduino_src/         # ESP32-CAM Arduino 源码
-│   └── CameraWebServer/ # 摄像头服务端
-├── docs/                # 文档与模型文件
-├── BntechEyeFriend.pro  # Qt 工程文件
-└── CMakeLists.txt       # CMake 构建文件
-```
+This project uses a **dual-license model**:
 
-## 使用方式
+- **Non-commercial use** → GNU General Public License v3.0 (GPLv3): free for personal use, academic research, non-profit organizations, and fully open-source derivative projects.
+- **Commercial use** → A commercial license must be obtained from the project author for enterprise tools, hardware/software products for sale, closed-source redistribution, paid SaaS services, and OEM/ODM mass production.
 
-1. **启动应用**，授权摄像头权限
-2. **添加人脸**：在人脸管理界面录入需要识别的人员照片及姓名
-3. **开始识别**：将摄像头对准需要辨认的人，系统自动检测并匹配
-4. **语音播报**：识别成功时自动语音播报姓名
-5. **点击人脸框**可放大查看人脸细节
-
-## 适用场景
-
-- 视力障碍者日常社交场合辨认亲友
-- 面孔失认症患者辅助识人
-- 老年人记忆力减退时的认人辅助
-- 会议、聚会等多人场景下的人员辨认
-
-## 许可证
-
-本项目采用**双许可模式**，使用者可从以下两种许可中二选一：
-
-### 一、非商业用途 → GNU General Public License v3.0 (GPLv3)
-
-✅ **可使用 GPLv3（无需付费授权）**：
-
-- 个人纯自用、学习、毕业设计、学术科研（无盈利目的）
-- 公益无障碍机构、非营利组织免费部署使用，不产生任何收费、广告、付费会员
-- 完全开源衍生项目，整体代码持续开源、无商业化售卖设备/软件服务
-
-完整 GPLv3 条款详见 [LICENSE-GPLv3](LICENSE-GPLv3) 文件。
-
-### 二、商业用途 → 必须获取商业授权
-
-❌ **必须联系项目作者获取书面商业授权协议**（不可直接使用 GPLv3）：
-
-- 企业、工作室用于内部工具、对外软硬件产品售卖（含低视力识别硬件整机、APP 收费下载）
-- 基于本项目二次开发后闭源分发、嵌入式固件预装到售卖设备
-- 提供付费识别 SaaS 服务、定制开发外包、搭载广告盈利
-- OEM/ODM 批量搭载到量产设备对外销售
-
-> 📧 商业授权咨询：请联系项目作者获取详细授权条款与报价。
-
-### 界定标准
-
-| 场景 | 可使用 GPLv3 | 需商业授权 |
-|------|:-----------:|:---------:|
-| 个人自用/学习/科研（无盈利） | ✅ | |
-| 公益/非营利组织免费使用 | ✅ | |
-| 完全开源衍生项目 | ✅ | |
-| 企业内部工具 | | ✅ |
-| 软硬件产品售卖 | | ✅ |
-| 闭源二次分发 | | ✅ |
-| 付费 SaaS 服务 | | ✅ |
-| OEM/ODM 量产设备 | | ✅ |
+> 📧 For commercial licensing inquiries, please contact the project author.
 
 ---
 
-*让每个人都能"看见"身边的人。*
+*Helping everyone "see" the people around them.*
