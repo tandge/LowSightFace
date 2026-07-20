@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>摄像头识人</title>
+<title>摄像头识人V260720.2</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 20px; }
@@ -934,6 +934,9 @@ async function extractFeature(alignedPixels) {
 
 // ============ TTS Voice ============
 
+let speechLoopActive = false;
+let latestMatchedNames = null;  // Shared state: set by processOneCycle, consumed by scheduleNextSpeech
+
 function speak(text) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis) {
@@ -960,42 +963,46 @@ function speak(text) {
       finish();
     };
 
+    // iOS may need resume (some WebKit versions pause the queue)
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
 
     window.speechSynthesis.speak(utterance);
 
-    setTimeout(finish, 8000);
+    // Fallback timeout: Chrome/iOS may not fire onend for short utterances
+    setTimeout(finish, 5000);
   });
 }
 
-async function announceAllRecognitions(matchedNames) {
-  if (!window.speechSynthesis) {
-    console.log('[tts] SpeechSynthesis not supported, skipping voice');
-    return;
-  }
-  if (!matchedNames || matchedNames.length === 0) return;
+function speakSilence() {
+  return speak('');
+}
 
-  // Deduplicate: skip if same set of names as last announcement
-  const currentNamesStr = matchedNames.slice().sort().join(',');
-  if (currentNamesStr === lastAnnouncedNamesStr) {
-    console.log('[tts] Skipping duplicate announcement for:', currentNamesStr);
-    return;
-  }
+function scheduleNextSpeech() {
+  if (!speechLoopActive) return;
 
-  voiceIndicator.classList.add('active');
+  const names = latestMatchedNames;
+  const currentNamesStr = (names && names.length > 0) ? names.slice().sort().join(',') : '';
 
-  try {
-    const text = matchedNames.join('，');
-    console.log('[tts] Speaking:', text);
-    await speak(text);
+  if (currentNamesStr && currentNamesStr !== lastAnnouncedNamesStr) {
+    // New names to announce
     lastAnnouncedNamesStr = currentNamesStr;
-  } catch (err) {
-    console.error('[tts] Speak error:', err);
+    const text = names.join('，');
+    console.log('[tts] Speaking:', text);
+    voiceIndicator.classList.add('active');
+    speak(text).then(() => {
+      voiceIndicator.classList.remove('active');
+      // Chain next utterance — onend chaining is reliable on iOS
+      setTimeout(scheduleNextSpeech, 2000);
+    });
+  } else {
+    // No new names — play silence to keep iOS speech session alive
+    console.log('[tts] No new names, playing silence');
+    speakSilence().then(() => {
+      setTimeout(scheduleNextSpeech, 2000);
+    });
   }
-
-  voiceIndicator.classList.remove('active');
 }
 
 
@@ -1084,6 +1091,7 @@ async function processOneCycle() {
       appendLog(getTimestamp() + ' No target');
       faceCount.textContent = 'Faces detected: 0';
       lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
       displayResults([], getThreshold(), 0, 0);
       return;
     }
@@ -1208,13 +1216,16 @@ async function processOneCycle() {
       setStatus(cameraStatus, 'warn',
         'No match | ' + totalDetected + ' face(s) detected | Threshold: ' + threshold.toFixed(2));
       lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
     }
 
     // Display results in UI
     displayResults(faceResults, threshold, totalDetected, matchedCount);
 
-    // Announce all matched names via TTS (non-blocking)
-    announceAllRecognitions(matchedNames);
+    // Store latest matched names for the speech loop (runs every 2s independently)
+    // Reset lastAnnouncedNamesStr so names are re-announced on every detection cycle
+    lastAnnouncedNamesStr = null;
+    latestMatchedNames = matchedNames.length > 0 ? matchedNames : null;
 
   } catch (err) {
     console.error('[cycle] Error:', err);
@@ -1230,6 +1241,28 @@ async function processOneCycle() {
 
 async function startMonitoring() {
   if (isMonitoring) return;
+
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      var prime = new SpeechSynthesisUtterance('');
+      prime.volume = 0.5;
+      prime.rate = 2;
+      prime.onend = function() {
+        // Now the iOS speech session is active; start the real loop
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      prime.onerror = function() {
+        // Even if priming fails, try the loop anyway
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      window.speechSynthesis.speak(prime);
+    } else {
+      speechLoopActive = true;
+      scheduleNextSpeech();
+    }
+
 
   const lib = parseFaceLibrary();
   if (!lib || lib.length === 0) {
@@ -1259,16 +1292,10 @@ async function startMonitoring() {
 
     appendLog('========== Monitoring Start ' + getTimestamp() + ' ==========');
 
-    // iOS workaround: prime the speech session from the user gesture (click).
+    // iOS workaround: preload voices (required for some iOS versions)
+    // Prime the speech session with a silent utterance from the user gesture.
     // This establishes the iOS "user gesture" speech session so subsequent
-    // speak() calls (even from setInterval) will produce sound.
-    if (window.speechSynthesis) {
-      window.speechSynthesis.getVoices();
-      var primeTts = new SpeechSynthesisUtterance('');
-      primeTts.volume = 0;
-      primeTts.rate = 2;
-      window.speechSynthesis.speak(primeTts);
-    }
+    // speak() calls (even from setTimeout) will produce sound.
 
     processOneCycle();
 
@@ -1289,6 +1316,8 @@ function stopMonitoring() {
   if (!isMonitoring) return;
 
   isMonitoring = false;
+  speechLoopActive = false;
+
   if (monitorTimer) {
     clearInterval(monitorTimer);
     monitorTimer = null;
