@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESP32 Camera Face Recognition</title>
+<title>ESP32 摄像头识人20260721.6</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 20px; }
@@ -103,7 +103,7 @@
     </div>
     <div class="inline-row">
       <label class="model-select-label">Camera URL</label>
-      <input type="text" id="cameraUrl" value="http://172.20.10.12/capture" placeholder="http://172.20.10.12/capture">
+      <input type="text" id="cameraUrl" value="https://172.20.10.12/capture" placeholder="https://172.20.10.12/capture">
     </div>
     <div class="threshold-row">
       <label for="thresholdSlider">置信度</label>
@@ -269,7 +269,10 @@ async function loadCameraImage() {
   }
 
   const cacheBuster = '?t=' + Date.now();
-  const response = await fetch(url + cacheBuster);
+  const fullUrl = url + cacheBuster;
+  console.log('[cam] Fetching:', fullUrl);
+
+  const response = await fetch(fullUrl);
 
   if (!response.ok) {
     throw new Error('HTTP ' + response.status + ': ' + response.statusText);
@@ -280,13 +283,8 @@ async function loadCameraImage() {
 
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => {
-      resolve({ img, blobUrl });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(blobUrl);
-      reject(new Error('Failed to decode camera image'));
-    };
+    img.onload = () => { resolve({ img, blobUrl }); };
+    img.onerror = () => { URL.revokeObjectURL(blobUrl); reject(new Error('Failed to decode camera image')); };
     img.src = blobUrl;
   });
 }
@@ -487,7 +485,7 @@ async function captureCameraFrame() {
   const vh = img.height;
 
   if (vw === 0 || vh === 0) {
-    URL.revokeObjectURL(blobUrl);
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
     throw new Error('Image dimensions are zero');
   }
 
@@ -530,7 +528,7 @@ async function captureCameraFrame() {
     ' | Display: ' + displayW + 'x' + displayH;
 
   // Clean up blob URL after drawing
-  URL.revokeObjectURL(blobUrl);
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
 
   return {
     width: vw, height: vh,
@@ -788,7 +786,8 @@ function speak(text) {
       return;
     }
 
-    window.speechSynthesis.cancel();
+    // IMPORTANT: Do NOT call cancel() here — it breaks the iOS speech session.
+    // Only cancel when the user explicitly stops monitoring.
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
@@ -800,44 +799,54 @@ function speak(text) {
     const finish = () => { if (!done) { done = true; resolve(); } };
 
     utterance.onend = finish;
-    utterance.onerror = () => finish();
+    utterance.onerror = (e) => {
+      console.log('[tts] Speak error:', e.error || 'unknown');
+      finish();
+    };
 
+    // iOS may need resume (some WebKit versions pause the queue)
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
 
     window.speechSynthesis.speak(utterance);
 
-    setTimeout(finish, 8000);
+    // Fallback timeout: Chrome/iOS may not fire onend for short utterances
+    setTimeout(finish, 5000);
   });
 }
 
-async function announceAllRecognitions(matchedNames) {
-  if (!window.speechSynthesis) {
-    console.log('[tts] SpeechSynthesis not supported, skipping voice');
-    return;
-  }
-  if (!matchedNames || matchedNames.length === 0) return;
+let speechLoopActive = false;
+let latestMatchedNames = null;  // Shared state: set by processOneCycle, consumed by scheduleNextSpeech
 
-  // Deduplicate: skip if same set of names as last announcement
-  const currentNamesStr = matchedNames.slice().sort().join(',');
-  if (currentNamesStr === lastAnnouncedNamesStr) {
-    console.log('[tts] Skipping duplicate announcement for:', currentNamesStr);
-    return;
-  }
+function speakSilence() {
+  return speak('');
+}
 
-  voiceIndicator.classList.add('active');
+function scheduleNextSpeech() {
+  if (!speechLoopActive) return;
 
-  try {
-    const text = matchedNames.join('，');
-    console.log('[tts] Speaking:', text);
-    await speak(text);
+  const names = latestMatchedNames;
+  const currentNamesStr = (names && names.length > 0) ? names.slice().sort().join(',') : '';
+
+  if (currentNamesStr && currentNamesStr !== lastAnnouncedNamesStr) {
+    // New names to announce
     lastAnnouncedNamesStr = currentNamesStr;
-  } catch (err) {
-    console.error('[tts] Speak error:', err);
+    const text = names.join('，');
+    console.log('[tts] Speaking:', text);
+    voiceIndicator.classList.add('active');
+    speak(text).then(() => {
+      voiceIndicator.classList.remove('active');
+      // Chain next utterance — onend chaining is reliable on iOS
+      setTimeout(scheduleNextSpeech, 2000);
+    });
+  } else {
+    // No new names — play silence to keep iOS speech session alive
+    console.log('[tts] No new names, playing silence');
+    speakSilence().then(() => {
+      setTimeout(scheduleNextSpeech, 2000);
+    });
   }
-
-  voiceIndicator.classList.remove('active');
 }
 
 
@@ -928,6 +937,7 @@ async function processOneCycle() {
       appendLog(getTimestamp() + ' No target');
       faceCount.textContent = 'Faces detected: 0';
       lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
       displayResults([], getThreshold(), 0, 0);
       return;
     }
@@ -1052,13 +1062,16 @@ async function processOneCycle() {
       setStatus(cameraStatus, 'warn',
         'No match | ' + totalDetected + ' face(s) detected | Threshold: ' + threshold.toFixed(2));
       lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
     }
 
     // Display results in UI
     displayResults(faceResults, threshold, totalDetected, matchedCount);
 
-    // Announce all matched names via TTS (non-blocking)
-    announceAllRecognitions(matchedNames);
+    // Store latest matched names for the speech loop (runs every 2s independently)
+    // Reset lastAnnouncedNamesStr so names are re-announced on every detection cycle
+    lastAnnouncedNamesStr = null;
+    latestMatchedNames = matchedNames.length > 0 ? matchedNames : null;
 
   } catch (err) {
     console.error('[cycle] Error:', err);
@@ -1074,6 +1087,28 @@ async function processOneCycle() {
 
 async function startMonitoring() {
   if (isMonitoring) return;
+
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      var prime = new SpeechSynthesisUtterance('');
+      prime.volume = 0.5;
+      prime.rate = 2;
+      prime.onend = function() {
+        // Now the iOS speech session is active; start the real loop
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      prime.onerror = function() {
+        // Even if priming fails, try the loop anyway
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      window.speechSynthesis.speak(prime);
+    } else {
+      speechLoopActive = true;
+      scheduleNextSpeech();
+    }
+
 
   const lib = parseFaceLibrary();
   if (!lib || lib.length === 0) {
@@ -1113,6 +1148,12 @@ function stopMonitoring() {
   if (!isMonitoring) return;
 
   isMonitoring = false;
+  speechLoopActive = false;
+
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+
   if (monitorTimer) {
     clearInterval(monitorTimer);
     monitorTimer = null;
