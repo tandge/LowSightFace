@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <ESPmDNS.h>
 
 // ===========================
 // Select camera model in board_config.h
@@ -11,7 +12,7 @@
 // Enter your WiFi credentials
 // ===========================
 const char *ssid = "NB3";
-const char *password = "***";
+const char *password = "gnzb$201199";
 
 // ========== 静态IP配置（目标 192.168.5.105）==========
 IPAddress staticIP(172, 20, 10, 12);
@@ -132,9 +133,20 @@ void setup() {
   Serial.println("");
   Serial.println("WiFi connected");
 
+  // ==================== mDNS 初始化 ====================
+  if (MDNS.begin("esp32s3")) {
+    Serial.println("mDNS responder started");
+    MDNS.addService("https", "tcp", 443);
+    Serial.print("  mDNS hostname: esp32s3.local");
+    Serial.println(" (https://esp32s3.local)");
+  } else {
+    Serial.println("mDNS FAILED!");
+  }
+  // ====================================================
+
   startCameraServer();
 
-  Serial.print("Camera Ready! Use 'http://");
+  Serial.print("Camera Ready! Use 'https://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
 }

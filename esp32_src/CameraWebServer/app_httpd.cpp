@@ -14,6 +14,7 @@
 
 #include "Arduino.h"
 #include "esp_http_server.h"
+#include "esp_https_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
 #include "img_converters.h"
@@ -22,6 +23,8 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include "board_config.h"
+#include "esp32_cert/cert.h"
+#include "mbedtls/base64.h"
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -672,9 +675,107 @@ static esp_err_t index_handler(httpd_req_t *req) {
   }
 }
 
+static esp_err_t cors_options_handler(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type, X-Timestamp");
+  httpd_resp_set_hdr(req, "Access-Control-Max-Age", "86400");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// Helper: extract base64 from PEM and decode to DER
+static uint8_t *pem_to_der(const char *pem_buf, const char *header, const char *footer, size_t *der_len) {
+  const char *start = strstr(pem_buf, header);
+  if (!start) return NULL;
+  start += strlen(header);
+  if (*start == '\r') start++;
+  if (*start == '\n') start++;
+  else return NULL;
+
+  const char *end = strstr(start, footer);
+  if (!end || end <= start) return NULL;
+
+  // Count base64 chars (skip \r \n)
+  size_t b64_len = 0;
+  for (const char *p = start; p < end; p++) {
+    if (*p != '\r' && *p != '\n') b64_len++;
+  }
+  if (b64_len == 0) return NULL;
+
+  // Build contiguous base64 string
+  char *b64 = (char *)malloc(b64_len + 1);
+  if (!b64) return NULL;
+  size_t j = 0;
+  for (const char *p = start; p < end; p++) {
+    if (*p != '\r' && *p != '\n') b64[j++] = *p;
+  }
+  b64[b64_len] = '\0';
+
+  // Allocate DER buffer (b64_len is more than enough for decoded output)
+  uint8_t *der = (uint8_t *)malloc(b64_len);
+  if (!der) { free(b64); return NULL; }
+
+  size_t olen;
+  int ret = mbedtls_base64_decode(der, b64_len, &olen, (const unsigned char *)b64, b64_len);
+  free(b64);
+  if (ret != 0) {
+    free(der);
+    log_e("base64 decode failed: -0x%04x", -ret);
+    return NULL;
+  }
+
+  *der_len = olen;
+  return der;
+}
+
 void startCameraServer() {
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 16;
+  // ---- Split combined PEM into NULL-terminated cert + key ----
+  const char *key_marker = "-----BEGIN PRIVATE KEY-----";
+  size_t marker_len = strlen(key_marker);
+  const char *pem = (const char *)esp32_ssl_cert_esp32_server_pem;
+  size_t pem_len = esp32_ssl_cert_esp32_server_pem_len;
+  size_t cert_len = pem_len;
+  for (size_t i = 0; i < pem_len - marker_len; i++) {
+    if (memcmp(pem + i, key_marker, marker_len) == 0) { cert_len = i; break; }
+  }
+  size_t key_len = pem_len - cert_len;
+
+  char *cert_buf = (char *)malloc(cert_len + 1);
+  char *key_buf  = (char *)malloc(key_len + 1);
+  if (!cert_buf || !key_buf) {
+    log_e("malloc failed for cert/key buffers");
+    if (cert_buf) free(cert_buf);
+    if (key_buf) free(key_buf);
+    return;
+  }
+  memcpy(cert_buf, pem, cert_len); cert_buf[cert_len] = '\0';
+  memcpy(key_buf, pem + cert_len, key_len); key_buf[key_len] = '\0';
+  log_i("PEM cert: %u bytes, key: %u bytes", cert_len, key_len);
+
+  // ---- Convert PEM to DER (avoids strstr issues in transport layer) ----
+  size_t cert_der_len = 0, key_der_len = 0;
+  uint8_t *cert_der = pem_to_der(cert_buf, "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----", &cert_der_len);
+  uint8_t *key_der  = pem_to_der(key_buf,  "-----BEGIN PRIVATE KEY-----",  "-----END PRIVATE KEY-----",  &key_der_len);
+  free(cert_buf);
+  free(key_buf);
+
+  if (!cert_der || !key_der) {
+    log_e("PEM-to-DER conversion failed");
+    if (cert_der) free(cert_der);
+    if (key_der) free(key_der);
+    return;
+  }
+  log_i("DER cert: %u bytes, key: %u bytes", cert_der_len, key_der_len);
+
+  // ---- Main HTTPS server (port 443) ----
+  httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
+  config.httpd.max_uri_handlers = 17;
+  config.httpd.server_port = 443;
+  config.servercert = cert_der;
+  config.servercert_len = cert_der_len;
+  config.prvtkey_pem = key_der;
+  config.prvtkey_len = key_der_len;
 
   httpd_uri_t index_uri = {
     .uri = "/",
@@ -819,29 +920,61 @@ void startCameraServer() {
 #endif
   };
 
+  httpd_uri_t cors_uri = {
+    .uri = "/*",
+    .method = HTTP_OPTIONS,
+    .handler = cors_options_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = false,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
   ra_filter_init(&ra_filter, 20);
 
-  log_i("Starting web server on port: '%u'", config.server_port);
-  if (httpd_start(&camera_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(camera_httpd, &index_uri);
-    httpd_register_uri_handler(camera_httpd, &cmd_uri);
-    httpd_register_uri_handler(camera_httpd, &status_uri);
-    httpd_register_uri_handler(camera_httpd, &capture_uri);
-    httpd_register_uri_handler(camera_httpd, &bmp_uri);
-
-    httpd_register_uri_handler(camera_httpd, &xclk_uri);
-    httpd_register_uri_handler(camera_httpd, &reg_uri);
-    httpd_register_uri_handler(camera_httpd, &greg_uri);
-    httpd_register_uri_handler(camera_httpd, &pll_uri);
-    httpd_register_uri_handler(camera_httpd, &win_uri);
+  log_i("Starting HTTPS server on port %u ...", config.httpd.server_port);
+  esp_err_t err = httpd_ssl_start(&camera_httpd, &config);
+  if (err != ESP_OK) {
+    log_e("HTTPS server start FAILED! err=0x%x", err);
+    free(cert_der); free(key_der);
+    return;
   }
+  log_i("HTTPS server started OK");
 
-  config.server_port += 1;
-  config.ctrl_port += 1;
-  log_i("Starting stream server on port: '%u'", config.server_port);
-  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &stream_uri);
+  httpd_register_uri_handler(camera_httpd, &cors_uri);
+  httpd_register_uri_handler(camera_httpd, &index_uri);
+  httpd_register_uri_handler(camera_httpd, &cmd_uri);
+  httpd_register_uri_handler(camera_httpd, &status_uri);
+  httpd_register_uri_handler(camera_httpd, &capture_uri);
+  httpd_register_uri_handler(camera_httpd, &bmp_uri);
+  httpd_register_uri_handler(camera_httpd, &xclk_uri);
+  httpd_register_uri_handler(camera_httpd, &reg_uri);
+  httpd_register_uri_handler(camera_httpd, &greg_uri);
+  httpd_register_uri_handler(camera_httpd, &pll_uri);
+  httpd_register_uri_handler(camera_httpd, &win_uri);
+
+  // ---- Stream HTTPS server (port 444) ----
+  httpd_ssl_config_t stream_config = HTTPD_SSL_CONFIG_DEFAULT();
+  stream_config.httpd.server_port = 444;
+  stream_config.httpd.ctrl_port = 32769;
+  stream_config.httpd.max_uri_handlers = 4;
+  stream_config.servercert = cert_der;
+  stream_config.servercert_len = cert_der_len;
+  stream_config.prvtkey_pem = key_der;
+  stream_config.prvtkey_len = key_der_len;
+
+  log_i("Starting stream HTTPS server on port %u ...", stream_config.httpd.server_port);
+  err = httpd_ssl_start(&stream_httpd, &stream_config);
+  if (err != ESP_OK) {
+    log_e("Stream HTTPS server start FAILED! err=0x%x", err);
+    free(cert_der); free(key_der);
+    return;
   }
+  httpd_register_uri_handler(stream_httpd, &stream_uri);
+  log_i("Stream HTTPS server started OK");
 }
 
 void setupLedFlash() {
