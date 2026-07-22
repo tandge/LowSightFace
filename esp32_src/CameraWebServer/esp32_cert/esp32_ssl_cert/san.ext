@@ -1,0 +1,24 @@
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+C = CN
+ST = Local
+L = Lan
+O = XiaoS3Sense
+OU = HTTPS
+CN = esp32s3.local
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = esp32s3.local
+DNS.2 = *.local
+# IP占位段，覆盖全部内网网段 192.168.x.x / 10.x.x.x / 172.16-31.x.x
+IP.1 = 192.168.0.0
+IP.2 = 10.0.0.0
+IP.3 = 172.16.0.0
+IP.4 = 127.0.0.1
